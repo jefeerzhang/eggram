@@ -1,22 +1,34 @@
-# -*- coding: utf-8 -*-
 """
 make_video.py — 语法微课渲染器（Skill 阶段 2）
 
 分镜 JSON → 校验 → 小米 TTS → style token 注入 layout → 教学动效截帧 → ffmpeg 合成 mp4
 
-用法: python scripts/make_video.py examples/now_progressing.json [输出.mp4] [--style NAME] [--reuse-audio] [--no-motion]
+用法: python scripts/make_video.py examples/now_progressing.json [输出.mp4]
+      [--style NAME] [--reuse-audio] [--no-motion] [--preview]
 """
-import os, sys, json, re, math, base64, subprocess, urllib.request
+
+import base64
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+
+import imageio_ffmpeg
 import numpy as np
 from playwright.sync_api import sync_playwright
-import imageio_ffmpeg
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 TEMPLATE_DIR = os.path.join(ROOT, "templates")
 
-MI_URL = os.environ.get("MIMO_API_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions")
+MI_URL = os.environ.get(
+    "MIMO_API_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+)
 MI_KEY = os.environ.get("MIMO_API_KEY", "")
 MI_MODEL = "mimo-v2.5-tts"
 SAMPLE_RATE = 24000
@@ -31,8 +43,13 @@ LAYOUT_FILES = {
     "summary": "layout-summary.html",
 }
 KIND_BADGE = {
-    "title": "", "rule": "讲解", "example": "例句", "mistake": "易错",
-    "practice": "练习", "answer": "揭晓", "summary": "总结",
+    "title": "",
+    "rule": "讲解",
+    "example": "例句",
+    "mistake": "易错",
+    "practice": "练习",
+    "answer": "揭晓",
+    "summary": "总结",
 }
 ROLE_TO_KIND = {
     "learning_objective": "title",
@@ -207,19 +224,30 @@ def render_html(sc, W, H, style):
         html = MOTION_CSS + html
     body_html = highlight_body(sc.get("body", ""), kind)
     zh = sc.get("zh", sc.get("sub", ""))
-    return (html
-        .replace("__W__", str(W)).replace("__H__", str(H))
+    return (
+        html.replace("__W__", str(W))
+        .replace("__H__", str(H))
         .replace("__HEADER__", sc.get("header", ""))
         .replace("__BADGE__", KIND_BADGE.get(kind, ""))
         .replace("__SUB__", sc.get("sub", ""))
         .replace("__ZH__", zh)
-        .replace("__BODY__", body_html))
+        .replace("__BODY__", body_html)
+    )
 
 
 def validate_layouts():
     errors = []
-    banned = ("__PCT__", "__IDX__", "__TOTAL__", "class=\"progress\"", "class='progress'",
-              "class=\"pnum\"", "class='pnum'", "class=\"track\"", "class='track'")
+    banned = (
+        "__PCT__",
+        "__IDX__",
+        "__TOTAL__",
+        'class="progress"',
+        "class='progress'",
+        'class="pnum"',
+        "class='pnum'",
+        'class="track"',
+        "class='track'",
+    )
     for kind, fn in LAYOUT_FILES.items():
         raw = open(os.path.join(TEMPLATE_DIR, fn), encoding="utf-8").read()
         for token in banned:
@@ -245,11 +273,25 @@ def validate_layouts():
     return errors
 
 
+# 教学弧相位（docs/teaching-method.md）：title → rule+ → example+ → (mistake) → practice → answer → summary
+_ARC_PHASE = {
+    "title": 0,
+    "rule": 1,
+    "example": 2,
+    "mistake": 3,
+    "practice": 4,
+    "answer": 5,
+    "summary": 6,
+}
+
+
 def validate_storyboard(tpl):
-    errors = []
+    """返回 (errors, warnings)。errors 非空 → 闸门失败；warnings 仅打印。"""
+    errors, warnings = [], []
     scenes = tpl.get("scenes") or []
     if not scenes:
         errors.append("scenes 为空")
+        return errors, warnings
     kinds_seen = []
     for i, sc in enumerate(scenes):
         prefix = f"scenes[{i}]"
@@ -268,39 +310,126 @@ def validate_storyboard(tpl):
             if not val:
                 errors.append(f"{prefix}: {field} 不能为空")
             elif LEAK_RE.match(val):
-                errors.append(f"{prefix}: {field}={val!r} 像样式泄漏（色值/字号），不是教学内容")
+                errors.append(
+                    f"{prefix}: {field}={val!r} 像样式泄漏（色值/字号），不是教学内容"
+                )
         sub = (sc.get("sub") or "").strip()
         if sub and LEAK_RE.match(sub):
             errors.append(f"{prefix}: sub={sub!r} 像样式泄漏")
         if "motion" in sc and sc["motion"] not in MOTIONS:
-            errors.append(f"{prefix}: motion={sc['motion']!r} 非法（{', '.join(MOTIONS)}）")
+            errors.append(
+                f"{prefix}: motion={sc['motion']!r} 非法（{', '.join(MOTIONS)}）"
+            )
         if kind == "mistake":
             if "**" not in sc.get("body", ""):
-                errors.append(f"{prefix}: mistake（common_mistake）的 body 须用 ** 标出错误点")
+                errors.append(
+                    f"{prefix}: mistake（common_mistake）的 body 须用 ** 标出错误点"
+                )
             if not (sc.get("zh") or sc.get("sub")):
                 errors.append(f"{prefix}: mistake 须有 sub/zh 说明「为什么容易错」")
         if kind == "practice":
             if "**" not in sc.get("body", ""):
-                errors.append(f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点")
-            if float(sc.get("hold", 0) or 0) < 2.5:
-                errors.append(f"{prefix}: practice 建议 hold>=3.0（留思考时间）")
+                errors.append(
+                    f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
+                )
+            hold_v = float(sc.get("hold", 0) or 0)
+            if hold_v < 3.0:
+                errors.append(
+                    f"{prefix}: practice hold={hold_v} 须 >= 3.0（docs/teaching-method.md）"
+                )
         if kind == "answer":
             if "**" not in sc.get("body", ""):
-                errors.append(f"{prefix}: answer（check_reveal）的 body 须用 ** 标出正确语法点")
+                errors.append(
+                    f"{prefix}: answer（check_reveal）的 body 须用 ** 标出正确语法点"
+                )
         if role and role in ROLE_TO_KIND and ROLE_TO_KIND[role] != kind:
             errors.append(f"{prefix}: role={role} 与 kind={kind} 不一致")
+
     required = ["title", "rule", "example", "practice", "answer", "summary"]
     for k in required:
         if k not in kinds_seen:
-            errors.append(f"缺少必要 kind={k}（教学弧不完整；见 docs/teaching-method.md）")
-    return errors
+            errors.append(
+                f"缺少必要 kind={k}（教学弧不完整；见 docs/teaching-method.md）"
+            )
+
+    if kinds_seen and kinds_seen[0] != "title":
+        errors.append(f"教学弧须以 title 开头（现在是 {kinds_seen[0]}）")
+    if kinds_seen and kinds_seen[-1] != "summary":
+        errors.append(f"教学弧须以 summary 结尾（现在是 {kinds_seen[-1]}）")
+    if kinds_seen.count("title") > 1:
+        errors.append("title 只能出现一次")
+    if kinds_seen.count("summary") > 1:
+        errors.append("summary 只能出现一次")
+    if kinds_seen.count("practice") != 1 and "practice" in kinds_seen:
+        errors.append("practice 须恰好一次（其后紧跟 answer）")
+    if kinds_seen.count("answer") != 1 and "answer" in kinds_seen:
+        errors.append("answer 须恰好一次（紧跟 practice）")
+
+    last_phase, last_kind = -1, None
+    for i, k in enumerate(kinds_seen):
+        phase = _ARC_PHASE.get(k)
+        if phase is None:
+            continue
+        if phase < last_phase:
+            errors.append(
+                f"scenes[{i}] 教学弧错位: kind={k} 出现在 {last_kind} 之后"
+                f"（须 title→rule+→example+→(mistake)→practice→answer→summary）"
+            )
+        last_phase, last_kind = phase, k
+
+    for j in range(len(kinds_seen) - 1):
+        if kinds_seen[j] == "practice" and kinds_seen[j + 1] != "answer":
+            errors.append(
+                f"scenes[{j}] practice 后必须紧跟 answer（现在是 {kinds_seen[j + 1]}）"
+            )
+
+    if "practice" in kinds_seen:
+        pi = kinds_seen.index("practice")
+        if "mistake" not in kinds_seen[:pi]:
+            warnings.append(
+                f"scenes[{pi}] practice 前无 mistake（docs/teaching-method.md 推荐）"
+            )
+    return errors, warnings
 
 
 def validate_rendered_html(html, scene_index):
+    """占位符检查。溢出探测走 preview_overflow()，需 page 实测。"""
+    errs = []
     left = PLACEHOLDER_RE.findall(html)
     if left:
-        return [f"scenes[{scene_index}] 渲染后仍残留占位符: {sorted(set(left))}"]
-    return []
+        errs.append(f"scenes[{scene_index}] 渲染后仍残留占位符: {sorted(set(left))}")
+    return errs
+
+
+# 关键内容槽选择器（与 templates/layout-*.html 同步）。仅用于 preview 溢出探测。
+_OVERFLOW_SELECTORS = [".header", ".sub", ".body", ".zh", ".badge"]
+
+
+def preview_overflow(page, W, H):
+    """在已 set_content 的 page 上测关键槽是否溢出视口。返回 list[(selector, msg)]。"""
+    js = """([W, H, sels]) => {
+        const out = [];
+        for (const sel of sels) {
+            for (const el of document.querySelectorAll(sel)) {
+                if (!el || !el.textContent || !el.textContent.trim()) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                if (r.right > W + 0.5 || r.bottom > H + 0.5 || r.left < -0.5) {
+                    out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, (el.textContent || '').slice(0, 40)]);
+                }
+            }
+        }
+        return out;
+    }"""
+    out = []
+    for sel, tag, l, t, r, b, txt in page.evaluate(js, [W, H, _OVERFLOW_SELECTORS]):
+        out.append(
+            (
+                sel,
+                f"{tag} {sel} 溢出视口 left={l:.0f} top={t:.0f} right={r:.0f} bottom={b:.0f}（viewport {W}x{H}），内容='{txt}'",
+            )
+        )
+    return out
 
 
 def mi_tts(text, voice):
@@ -308,11 +437,16 @@ def mi_tts(text, voice):
         raise RuntimeError("未设置环境变量 MIMO_API_KEY（小米 TTS）")
     payload = {
         "model": MI_MODEL,
-        "messages": [{"role": "user", "content": ""}, {"role": "assistant", "content": text}],
+        "messages": [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": text},
+        ],
         "audio": {"format": "wav", "voice": voice},
         "stream": False,
     }
-    req = urllib.request.Request(MI_URL, data=json.dumps(payload).encode(), method="POST")
+    req = urllib.request.Request(
+        MI_URL, data=json.dumps(payload).encode(), method="POST"
+    )
     req.add_header("Authorization", "Bearer " + MI_KEY)
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -327,6 +461,7 @@ SPEECH_FLOOR = 180.0  # |sample| 低于此视为静音（int16 幅度）
 
 def pcm_to_wav(pcm_bytes, path):
     import wave
+
     arr = np.frombuffer(pcm_bytes, dtype=np.int16)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
@@ -337,6 +472,7 @@ def pcm_to_wav(pcm_bytes, path):
 
 def read_wav_pcm(path):
     import wave
+
     with wave.open(path, "rb") as w:
         assert w.getnchannels() == 1 and w.getsampwidth() == 2
         rate = w.getframerate()
@@ -346,6 +482,7 @@ def read_wav_pcm(path):
 
 def write_wav_pcm(path, pcm, rate=SAMPLE_RATE):
     import wave
+
     pcm = np.asarray(pcm, dtype=np.int16)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
@@ -402,10 +539,14 @@ def prepare_scene_audio(raw_pcm, hold, fps, fade_sec=FADE_SEC, tail_pad=TAIL_PAD
     n_frames = max(1, int(math.ceil(dur * fps - 1e-9)))
     target = int(math.ceil(n_frames * SAMPLE_RATE / float(fps) - 1e-9))
     if target < len(speech):
-        n_frames = max(n_frames + 1, int(math.ceil(len(speech) * fps / float(SAMPLE_RATE) - 1e-9)))
+        n_frames = max(
+            n_frames + 1, int(math.ceil(len(speech) * fps / float(SAMPLE_RATE) - 1e-9))
+        )
         target = int(math.ceil(n_frames * SAMPLE_RATE / float(fps) - 1e-9))
     if target > len(speech):
-        speech = np.concatenate([speech, np.zeros(target - len(speech), dtype=np.float32)])
+        speech = np.concatenate(
+            [speech, np.zeros(target - len(speech), dtype=np.float32)]
+        )
     pcm = np.clip(np.rint(speech), -32768, 32767).astype(np.int16)
     return pcm, n_frames, n_frames / float(fps)
 
@@ -413,15 +554,20 @@ def prepare_scene_audio(raw_pcm, hold, fps, fade_sec=FADE_SEC, tail_pad=TAIL_PAD
 def main():
     args = [a for a in sys.argv[1:] if a]
     if not args or args[0] in ("-h", "--help"):
-        print("用法: python scripts/make_video.py <分镜.json> [输出.mp4] [--style NAME] [--reuse-audio] [--no-motion]")
-        print("  --reuse-audio  复用 _build/s*_raw.wav（仍 prepare / 音画锁）")
+        print(
+            "用法: python scripts/make_video.py <分镜.json> [输出.mp4] "
+            "[--style NAME] [--reuse-audio] [--no-motion] [--preview]"
+        )
+        print("  --reuse-audio  复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）")
         print("  --no-motion    关闭 focus/pulse/zoom")
+        print("  --preview      只截图+溢出探测，不调 TTS/ffmpeg")
         print("详见 SKILL.md / docs/audio.md / docs/motion.md")
         sys.exit(0 if args else 1)
 
     reuse_audio = "--reuse-audio" in args
     no_motion = "--no-motion" in args
-    args = [a for a in args if a not in ("--reuse-audio", "--no-motion")]
+    preview_flag = "--preview" in args
+    args = [a for a in args if a not in ("--reuse-audio", "--no-motion", "--preview")]
     style_override = None
     if "--style" in args:
         i = args.index("--style")
@@ -429,13 +575,17 @@ def main():
             print("ERROR: --style 需要名称（teaching|classroom|explainer）")
             sys.exit(1)
         style_override = args[i + 1]
-        args = args[:i] + args[i + 2:]
+        args = args[:i] + args[i + 2 :]
 
     tpl_path = args[0]
     with open(tpl_path, encoding="utf-8") as f:
         tpl = json.load(f)
-    out = args[1] if len(args) > 1 else os.path.join(
-        ROOT, "output", os.path.splitext(os.path.basename(tpl_path))[0] + ".mp4"
+    out = (
+        args[1]
+        if len(args) > 1
+        else os.path.join(
+            ROOT, "output", os.path.splitext(os.path.basename(tpl_path))[0] + ".mp4"
+        )
     )
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
@@ -448,8 +598,11 @@ def main():
     scenes = tpl["scenes"]
     motion_enabled = (not no_motion) and (tpl.get("motion", True) is not False)
 
-    print("0/3 校验布局与分镜...")
-    errors = validate_layouts() + validate_storyboard(tpl)
+    print("0/4 校验布局与分镜...")
+    layout_errs = validate_layouts()
+    sb_errs, sb_warns = validate_storyboard(tpl)
+    errors = layout_errs + sb_errs
+    warnings = sb_warns
     for i, sc in enumerate(scenes):
         try:
             resolve_motion(sc, motion_enabled)
@@ -457,61 +610,116 @@ def main():
             errors.extend(validate_rendered_html(html, i))
         except Exception as e:
             errors.append(f"scenes[{i}] 试渲染失败: {e}")
+    for w in warnings:
+        print(" WARN:", w)
     if errors:
         print("VALIDATION FAILED:")
         for e in errors:
             print(" -", e)
         sys.exit(2)
-    print(f"   style={style_name} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK")
+    print(
+        f"   style={style_name} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
+    )
 
-    print("1/3 生成配音..." + (" (reuse-audio)" if reuse_audio else ""))
+    # 预览闸门：缩略图 + 溢出；--preview 到此结束
+    print("1/4 预览截图与溢出...")
+    preview_rc = run_preview(tpl_path, scenes, style, W, H, motion_enabled)
+    if preview_flag:
+        sys.exit(preview_rc)
+    if preview_rc != 0:
+        print("预览未通过，已跳过配音/成片。修分镜或模板后重试；或单独跑 --preview。")
+        sys.exit(preview_rc)
+
+    print("2/4 生成配音..." + (" (reuse-audio)" if reuse_audio else ""))
     wavs, durs, frame_counts = [], [], []
+    lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
+    cache_dir = os.path.join(ROOT, "_build", lesson_key)
+    os.makedirs(cache_dir, exist_ok=True)
     for i, sc in enumerate(scenes):
-        raw_path = os.path.join(ROOT, "_build", f"s{i}_raw.wav")
-        wav = os.path.join(ROOT, "_build", f"s{i}.wav")
-        os.makedirs(os.path.dirname(wav), exist_ok=True)
+        raw_path, wav_path = _audio_paths(cache_dir, i, sc["narrate"], voice)
         hold = float(sc.get("hold", 0.0))
-        if reuse_audio and os.path.isfile(raw_path):
+        if reuse_audio and _cache_hit(raw_path, voice, sc["narrate"]):
             raw_pcm, rate = read_wav_pcm(raw_path)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(f"{raw_path} 采样率 {rate} != {SAMPLE_RATE}")
             src = "reuse"
-        elif reuse_audio and os.path.isfile(wav):
-            # 兼容旧缓存：若无 raw，把现有 wav 当旁白（可能已含错误处理，仍再跑 prepare）
-            raw_pcm, rate = read_wav_pcm(wav)
-            if rate != SAMPLE_RATE:
-                raise RuntimeError(f"{wav} 采样率 {rate} != {SAMPLE_RATE}")
-            write_wav_pcm(raw_path, raw_pcm, rate)
-            src = "reuse-legacy"
         else:
+            if reuse_audio:
+                print(f"   cache miss scene {i}（旁白/音色变更或无缓存），重 TTS")
             raw_pcm = np.frombuffer(mi_tts(sc["narrate"], voice), dtype=np.int16)
             write_wav_pcm(raw_path, raw_pcm, SAMPLE_RATE)
+            _write_cache_meta(raw_path, voice, sc["narrate"], SAMPLE_RATE)
             src = "tts"
         pcm, n_frames, dur = prepare_scene_audio(raw_pcm, hold, FPS)
-        write_wav_pcm(wav, pcm, SAMPLE_RATE)
-        wavs.append(wav)
+        write_wav_pcm(wav_path, pcm, SAMPLE_RATE)
+        wavs.append(wav_path)
         durs.append(dur)
         frame_counts.append(n_frames)
-        print(f"   scene {i} [{resolve_kind(sc)}/{resolve_motion(sc, motion_enabled)}]: {dur:.2f}s ({n_frames}f, hold={hold:.1f}, {src})")
-    print(f"   总时长 = {sum(durs):.2f}s  /  {sum(frame_counts)} frames @ {FPS}fps")
+        print(
+            f"   scene {i} [{resolve_kind(sc)}/{resolve_motion(sc, motion_enabled)}]: "
+            f"{dur:.2f}s ({n_frames}f, hold={hold:.1f}, {src})"
+        )
+    expected_dur = sum(durs)
+    print(f"   Σ(旁白+hold+尾垫) = {expected_dur:.2f}s  /  {sum(frame_counts)} frames @ {FPS}fps")
 
-    print("2/3 渲染 HTML 画面并合成...")
+    print("3/4 渲染 HTML 画面并合成...")
     n = len(wavs)
     # 音轨已在 prepare_scene_audio 完成淡化+hold 填充；此处只 aresample + concat，不再二次 afade
-    cmd = [FFMPEG, "-y", "-loglevel", "error", "-nostats",
-           "-framerate", str(FPS), "-f", "image2pipe", "-vcodec", "png", "-i", "-"]
+    cmd = [
+        FFMPEG,
+        "-y",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-framerate",
+        str(FPS),
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "-i",
+        "-",
+    ]
     for w in wavs:
         cmd += ["-i", w]
-    fparts = [f"[{i+1}:a]aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=mono[a{i}]" for i in range(n)]
+    fparts = [
+        f"[{i + 1}:a]aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=mono[a{i}]"
+        for i in range(n)
+    ]
     chain = "".join(f"[a{i}]" for i in range(n))
     fparts.append(f"{chain}concat=n={n}:v=0:a=1[outa]")
-    cmd += ["-filter_complex", ";".join(fparts), "-map", "0:v", "-map", "[outa]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "128k", "-ar", str(SAMPLE_RATE), "-ac", "1",
-            "-movflags", "+faststart", out]
+    cmd += [
+        "-filter_complex",
+        ";".join(fparts),
+        "-map",
+        "0:v",
+        "-map",
+        "[outa]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-ac",
+        "1",
+        "-movflags",
+        "+faststart",
+        out,
+    ]
     # 不用 -shortest：音画已按帧锁定同长
 
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     gi = 0
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=CHROME, headless=True)
@@ -546,7 +754,135 @@ def main():
     if rc != 0:
         print("FFMPEG ERR:", err[-2000:])
         sys.exit(1)
+
+    print("4/4 时长核对...")
+    actual_dur = _ffprobe_duration(out)
+    if actual_dur is not None and abs(actual_dur - expected_dur) > 0.15:
+        print(
+            f"   WARN: 时长偏差: 实测 {actual_dur:.2f}s vs Σ {expected_dur:.2f}s"
+            f"（差 {actual_dur - expected_dur:+.2f}s）"
+        )
+    elif actual_dur is not None:
+        print(f"   OK: {actual_dur:.2f}s ≈ {expected_dur:.2f}s")
     print(f"DONE -> {out}  ({os.path.getsize(out)} bytes)")
+
+
+# ---- 音频缓存：按 lesson 目录隔离；旁白+音色指纹；style 不参与（换皮不重 TTS）----
+
+
+def _audio_fingerprint(narrate, voice):
+    """8 字符内容指纹。voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
+    return hashlib.sha1(f"{voice}|{narrate}".encode("utf-8")).hexdigest()[:8]
+
+
+def _audio_paths(cache_dir, i, narrate, voice):
+    fp = _audio_fingerprint(narrate, voice)
+    raw = os.path.join(cache_dir, f"s{i}_{fp}_raw.wav")
+    wav = os.path.join(cache_dir, f"s{i}_{fp}.wav")
+    return raw, wav
+
+
+def _write_cache_meta(raw_path, voice, narrate, rate):
+    meta = {
+        "voice": voice,
+        "narrate": narrate,
+        "rate": rate,
+        "fp": _audio_fingerprint(narrate, voice),
+    }
+    with open(raw_path + ".meta.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
+def _cache_hit(raw_path, voice, narrate):
+    """raw 存在 + sidecar meta 与旁白/音色一致才命中。缺 meta → 失效（防旧共享缓存串课）。"""
+    if not os.path.isfile(raw_path):
+        return False
+    meta_path = raw_path + ".meta.json"
+    if not os.path.isfile(meta_path):
+        return False
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return False
+    return (
+        meta.get("voice") == voice
+        and meta.get("narrate") == narrate
+        and meta.get("fp") == _audio_fingerprint(narrate, voice)
+    )
+
+
+def _ffprobe_duration(path):
+    """通过 ffmpeg -i 解析 stderr 的 Duration 字段，返回秒；失败返回 None。"""
+    try:
+        r = subprocess.run([FFMPEG, "-i", path], capture_output=True, timeout=15)
+        s = r.stderr.decode(errors="replace")
+        m = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}\.\d+)", s)
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    except Exception:
+        pass
+    return None
+
+
+def run_preview(tpl_path, scenes, style, W, H, motion_enabled):
+    """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。"""
+    lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
+    out_dir = os.path.join(ROOT, "_build", "preview", lesson_key)
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"   → {out_dir}")
+    report = []
+    gate_errs = []
+    with sync_playwright() as p:
+        b = p.chromium.launch(executable_path=CHROME, headless=True)
+        page = b.new_page(viewport={"width": W, "height": H})
+        for i, sc in enumerate(scenes):
+            html = render_html(sc, W, H, style)
+            ph_errs = validate_rendered_html(html, i)
+            if ph_errs:
+                gate_errs.extend(ph_errs)
+            page.set_content(html)
+            # 静态预览：动效取 t=0，避免截到中间态
+            apply_motion_css_vars(
+                page, *motion_vars(resolve_motion(sc, motion_enabled), 0.0)
+            )
+            png = os.path.join(out_dir, f"s{i}.png")
+            page.screenshot(path=png, type="png", full_page=False)
+            findings = preview_overflow(page, W, H)
+            report.append(
+                {
+                    "i": i,
+                    "kind": resolve_kind(sc),
+                    "motion": resolve_motion(sc, motion_enabled),
+                    "png": png,
+                    "findings": [
+                        {"sel": sel, "msg": msg} for sel, msg in findings
+                    ],
+                    "placeholder_errs": ph_errs,
+                }
+            )
+            tag = "OK" if not ph_errs and not findings else "FAIL"
+            print(
+                f"   scene {i} [{resolve_kind(sc)}/{resolve_motion(sc, motion_enabled)}]: {tag}  → {png}"
+            )
+        b.close()
+    report_path = os.path.join(out_dir, "overflow.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    if gate_errs:
+        print("PREVIEW GATE FAILED:")
+        for e in gate_errs:
+            print(" -", e)
+        return 2
+    bad = [r for r in report if r["findings"]]
+    if bad:
+        print(f"PREVIEW FAILED: {len(bad)}/{len(report)} 页有溢出（{report_path}）")
+        for r in bad:
+            for item in r["findings"]:
+                print(f" - scene {r['i']} ({r['kind']}) {item['sel']}: {item['msg']}")
+        return 1
+    print(f"   PREVIEW OK  {len(report)} 页")
+    return 0
 
 
 if __name__ == "__main__":

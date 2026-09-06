@@ -43,18 +43,19 @@ python scripts/validate_storyboard.py examples/<point_slug>.json
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
 ```bash
-python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style NAME] [--reuse-audio] [--no-motion]
+python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview]
 ```
 
-默认输出 `output/<json 主名>.mp4`。`--style` 覆盖换皮；`--reuse-audio` 复用 `s*_raw.wav`（仍 *音画锁*）；动效默认见 [`docs/motion.md`](docs/motion.md)。
+默认输出 `output/<json 主名>.mp4`。`--style` 覆盖换皮；`--reuse-audio` 按课目录 + 旁白/音色指纹复用 raw（[`docs/audio.md`](docs/audio.md)）；`--preview` 只出缩略图与溢出报告；动效见 [`docs/motion.md`](docs/motion.md)。
 
-渲染器自带二次 *闸门* → TTS/`prepare_scene_audio`（[`docs/audio.md`](docs/audio.md)）→ style 注入 layout → motion 截帧 → ffmpeg。
+管线：二次 *闸门* → **预览截图/溢出**（未过则停）→ TTS/`prepare_scene_audio` → 时长核验 → motion 截帧 → ffmpeg。`--preview` 在预览后退出。
 
 环境：`python` + playwright + imageio_ffmpeg + numpy；本机 Chrome/Edge；环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`）。
 
 ### 验收
 
-- *闸门* 绿
+- *闸门* 绿（含教学弧顺序；`practice.hold >= 3.0`）
+- 预览：`_build/preview/<slug>/s*.png` 无文字溢出
 - 画面：教学内容、整页居中、易错/练习可扫区分
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）
 - 音频：`hold` 段为静音；段间接缝干净；成片时长 ≈ Σ(旁白+hold)（*音画锁*）

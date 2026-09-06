@@ -14,6 +14,7 @@
 
 ```bash
 python scripts/make_video.py examples/now_progressing.json out.mp4 --style explainer --reuse-audio
+# 先看页：python scripts/make_video.py examples/now_progressing.json --preview --style explainer
 ```
 
 新皮：新增 `templates/style-<name>.json`，token 齐备（palette / typography / exercise）；layout 继续只服务 kind。

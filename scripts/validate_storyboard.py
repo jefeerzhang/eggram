@@ -17,13 +17,17 @@ def main():
         tpl = json.load(f)
     style = load_style(tpl.get("style", "teaching"))
     W, H = int(tpl.get("width", 1280)), int(tpl.get("height", 720))
-    errors = validate_layouts() + validate_storyboard(tpl)
+    layout_errs = validate_layouts()
+    sb_errs, sb_warns = validate_storyboard(tpl)
+    errors = layout_errs + sb_errs
     for i, sc in enumerate(tpl.get("scenes") or []):
         try:
             html = render_html(sc, W, H, style)
             errors.extend(validate_rendered_html(html, i))
         except Exception as e:
             errors.append(f"scenes[{i}] 试渲染失败: {e}")
+    for w in sb_warns:
+        print(" WARN:", w)
     if errors:
         print("VALIDATION FAILED:")
         for e in errors:
