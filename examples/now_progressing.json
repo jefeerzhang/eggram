@@ -1,0 +1,92 @@
+{
+  "title": "现在进行时",
+  "voice": "茉莉",
+  "style": "teaching",
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "scenes": [
+    {
+      "kind": "title",
+      "role": "learning_objective",
+      "header": "现在进行时",
+      "sub": "Present Continuous",
+      "body": "现在进行时",
+      "narrate": "现在进行时，表示正在发生、正在进行的动作。今天我们用一分半学会它。"
+    },
+    {
+      "kind": "rule",
+      "role": "concept_anchor",
+      "header": "结构：be + doing",
+      "sub": "am / is / are + verb-ing",
+      "body": "**be + 动词ing**",
+      "narrate": "它的结构很固定，就是 be 动词，加上动词的 ing 形式。"
+    },
+    {
+      "kind": "rule",
+      "role": "concept_anchor",
+      "header": "动词 ing 怎么变",
+      "sub": "大多数动词直接加 ing",
+      "body": "play → **playing**",
+      "narrate": "大多数动词直接加 ing。比如 play，变 playing；eat，变 eating。"
+    },
+    {
+      "kind": "rule",
+      "role": "concept_anchor",
+      "header": "特殊变化",
+      "sub": "以不发音的 e 结尾，去 e 加 ing",
+      "body": "make → **making**",
+      "narrate": "以不发音的 e 结尾，去 e 加 ing，比如 make，变 making。"
+    },
+    {
+      "kind": "example",
+      "role": "worked_demo",
+      "header": "例句",
+      "sub": "她正在读书",
+      "body": "She **is reading** a book.",
+      "narrate": "She is reading a book. 她正在读书。is 加 reading。"
+    },
+    {
+      "kind": "example",
+      "role": "worked_demo",
+      "header": "例句",
+      "sub": "我正在吃苹果",
+      "body": "I **am eating** an apple.",
+      "narrate": "I am eating an apple. 我正在吃苹果。am 加 eating。"
+    },
+    {
+      "kind": "mistake",
+      "role": "common_mistake",
+      "header": "最容易写错",
+      "sub": "以为 be 后面可以直接加原形",
+      "zh": "be 后面要的是 doing，不是原形动词",
+      "body": "He is **watch** TV.",
+      "narrate": "很多人会写成 He is watch TV。看见 is 就满足了，忘了动词还要加 ing。"
+    },
+    {
+      "kind": "practice",
+      "role": "understanding_check",
+      "header": "练习时间",
+      "sub": "先想一想，这句话对吗？",
+      "body": "He is **watch** TV. ?",
+      "narrate": "请判断：He is watch TV. 这句话对还是不对？先想一想。",
+      "hold": 3.0
+    },
+    {
+      "kind": "answer",
+      "role": "check_reveal",
+      "header": "揭晓",
+      "sub": "动词要加 ing",
+      "body": "He is **watching** TV. ✓",
+      "narrate": "不对。正确的应该是 He is watching TV. 动词要加 ing。"
+    },
+    {
+      "kind": "summary",
+      "role": "recap",
+      "header": "总结",
+      "sub": "我们下个语法点见",
+      "body": "**be + doing** = 正在进行",
+      "narrate": "记住：be 加 do ing，正在发生它就灵。我们下个语法点见。"
+    }
+  ]
+}

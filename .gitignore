@@ -1,0 +1,27 @@
+# build / media
+_build/
+output/
+*.mp4
+*.pcm
+*.wav
+
+# python
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+
+# local / debug
+.statamcp/
+.scratch/
+_*.png
+_*.py
+.env
+.env.*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

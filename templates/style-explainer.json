@@ -1,0 +1,37 @@
+{
+  "style_id": "grammar-explainer",
+  "kind": "style",
+  "source": "eggram; ppt-master science-explainer paper-cut / light density",
+  "summary": "科普解说皮：浅纸色、更大字号与留白感、青蓝强调；适合类比与易错纠偏。",
+  "inspired_by": "ppt-master/templates/styles/science-explainer",
+  "palette": {
+    "bg": "#faf7f2",
+    "bg_grad2": "#f0e9df",
+    "surface": "#fffdf9",
+    "surface_border": "rgba(60,48,32,0.14)",
+    "ink": "#2a241c",
+    "ink_sub": "#6b6358",
+    "accent": "#3d7ea6",
+    "correct": "#2d8a56",
+    "wrong": "#c45c4a",
+    "practice_fill": "rgba(61,126,166,0.07)"
+  },
+  "color_jobs": {
+    "accent": "new / changed / emphasis",
+    "correct": "right form",
+    "wrong": "wrong form / common mistake",
+    "ink_sub": "secondary instruction only — never as body content"
+  },
+  "typography": {
+    "family": "'Microsoft YaHei','PingFang SC',sans-serif",
+    "title_size": 50,
+    "body_size": 58,
+    "sub_size": 28,
+    "badge_size": 20
+  },
+  "exercise": {
+    "border_style": "dashed",
+    "border_width": "3px",
+    "border_color": "#3d7ea6"
+  }
+}

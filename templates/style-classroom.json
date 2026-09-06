@@ -1,0 +1,37 @@
+{
+  "style_id": "grammar-classroom",
+  "kind": "style",
+  "source": "eggram; ppt-master workshop-teaching light/calm defaults",
+  "summary": "浅色课堂皮：纸质暖白底、蓝强调；正确绿/错误红语义不变；适合白天、板书感。",
+  "inspired_by": "ppt-master/templates/styles/workshop-teaching",
+  "palette": {
+    "bg": "#f5f2eb",
+    "bg_grad2": "#ebe6dc",
+    "surface": "#ffffff",
+    "surface_border": "rgba(44,52,64,0.12)",
+    "ink": "#1c2430",
+    "ink_sub": "#5c6470",
+    "accent": "#2b6cb0",
+    "correct": "#1f8a4c",
+    "wrong": "#c0392b",
+    "practice_fill": "rgba(43,108,176,0.06)"
+  },
+  "color_jobs": {
+    "accent": "new / changed / emphasis",
+    "correct": "right form",
+    "wrong": "wrong form / common mistake",
+    "ink_sub": "secondary instruction only — never as body content"
+  },
+  "typography": {
+    "family": "'Microsoft YaHei','PingFang SC',sans-serif",
+    "title_size": 46,
+    "body_size": 54,
+    "sub_size": 26,
+    "badge_size": 20
+  },
+  "exercise": {
+    "border_style": "dashed",
+    "border_width": "3px",
+    "border_color": "#2b6cb0"
+  }
+}

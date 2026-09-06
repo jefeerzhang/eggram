@@ -1,0 +1,37 @@
+{
+  "style_id": "grammar-dark",
+  "kind": "style",
+  "source": "eggram; ppt-master workshop-teaching dark variant",
+  "summary": "深色语法微课视觉：强调色标新/变，绿色标正确，红色标错误；练习页虚线框与讲解页可扫区分。",
+  "inspired_by": "ppt-master/templates/styles/workshop-teaching",
+  "palette": {
+    "bg": "#14171d",
+    "bg_grad2": "#1b2029",
+    "surface": "rgba(255,255,255,0.06)",
+    "surface_border": "rgba(255,255,255,0.14)",
+    "ink": "#f4f6fa",
+    "ink_sub": "#9aa3b2",
+    "accent": "#ffb020",
+    "correct": "#2ecc71",
+    "wrong": "#e74c3c",
+    "practice_fill": "rgba(0,0,0,0.25)"
+  },
+  "color_jobs": {
+    "accent": "new / changed / emphasis",
+    "correct": "right form",
+    "wrong": "wrong form / common mistake",
+    "ink_sub": "secondary instruction only — never as body content"
+  },
+  "typography": {
+    "family": "'Microsoft YaHei','PingFang SC',sans-serif",
+    "title_size": 46,
+    "body_size": 54,
+    "sub_size": 26,
+    "badge_size": 20
+  },
+  "exercise": {
+    "border_style": "dashed",
+    "border_width": "3px",
+    "border_color": "#ffb020"
+  }
+}
