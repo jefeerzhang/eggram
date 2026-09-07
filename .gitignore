@@ -11,6 +11,11 @@ __pycache__/
 .Python
 .venv/
 venv/
+.pytest_cache/
+.ruff_cache/
+
+# local agent/editor state
+.qoder/
 
 # local / debug
 .statamcp/
