@@ -95,8 +95,34 @@ MOTION_CSS = """
     filter: drop-shadow(0 0 calc(var(--m-glow, 0) * 16px) currentColor);
     will-change: transform, filter;
   }
+  .icon-inline{
+    display: inline-flex;
+    width: 1.15em;
+    height: 1.15em;
+    vertical-align: -0.2em;
+    margin: 0 0.08em;
+    color: inherit;
+  }
+  .icon-inline svg{width:100%;height:100%;display:block;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 </style>
 """
+
+# 教学场景图标（inline SVG，currentColor 继承 .hl/.err 色，跟着 pulse 一起动）
+#  body 中使用 [name]**词** 语法；placeholder 会被 highlight_body 还原为 <span class="icon-inline">SVG</span>
+_ICON_SVG_ATTR = 'viewBox="0 0 24 24"'
+ICONS = {
+    "brain": f'<svg {_ICON_SVG_ATTR}><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 3 3 3 0 0 0 1 2 3 3 0 0 0 3 3M9 4a3 3 0 0 1 3 3v10a1 1 0 0 1-1 1M9 4v13M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 3 3 3 0 0 1-1 2 3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v10a1 1 0 0 0 1 1M15 4v13"/></svg>',
+    "wrench": f'<svg {_ICON_SVG_ATTR}><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    "memory": f'<svg {_ICON_SVG_ATTR}><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 4v4M16 4v4M4 10h16M8 16h2M14 16h2"/></svg>',
+    "cycle": f'<svg {_ICON_SVG_ATTR}><path d="M21 12a9 9 0 1 1-3.5-7.1"/><path d="M21 3v6h-6"/></svg>',
+    "harness": f'<svg {_ICON_SVG_ATTR}><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M8 6V4h8v2"/><circle cx="12" cy="13" r="2.5"/><path d="M12 16v2M9 10l-2-2M15 10l2-2"/></svg>',
+    "bulb": f'<svg {_ICON_SVG_ATTR}><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.7.7 1 1.4 1 2.3h6c0-.9.3-1.6 1-2.3A7 7 0 0 0 12 2z"/></svg>',
+    "cross": f'<svg {_ICON_SVG_ATTR}><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+    "pencil": f'<svg {_ICON_SVG_ATTR}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    "check": f'<svg {_ICON_SVG_ATTR}><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg>',
+    "bookmark": f'<svg {_ICON_SVG_ATTR}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+}
+_ICON_TOKEN_RE = re.compile(r"\[(\w+)\]")
 
 PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
 # 仅拦样式 hex token；不拦纯数字——教学文本里「100 米」「5 个动作」常见，误伤面太大。
@@ -198,10 +224,27 @@ def _escape(text):
 
 def highlight_body(body, kind):
     hl_cls = "err" if kind in ("practice", "mistake") else "hl"
-    parts = str(body).split("**")
+    # 1. [name] token 提取为占位符（避免被 _escape 转义）
+    icon_map = {}
+    counter = [0]
+
+    def stash(m):
+        name = m.group(1)
+        if name not in ICONS:
+            return m.group(0)
+        key = f"@@ICON{counter[0]}@@"
+        icon_map[key] = ICONS[name]
+        counter[0] += 1
+        return key
+
+    body_with_ph = _ICON_TOKEN_RE.sub(stash, str(body))
+    parts = body_with_ph.split("**")
     out = []
     for j, part in enumerate(parts):
         esc = _escape(part)
+        # 2. 占位符原为 <span class="icon-inline">SVG</span>，嵌入 hl/err span 内部
+        for k, svg in icon_map.items():
+            esc = esc.replace(k, f'<span class="icon-inline">{svg}</span>')
         out.append(f'<span class="{hl_cls}">{esc}</span>' if j % 2 == 1 else esc)
     return "".join(out)
 
@@ -647,7 +690,9 @@ def prepare_scene_audio(raw_pcm, hold, fps, fade_sec=FADE_SEC, tail_pad=TAIL_PAD
     hold = max(0.0, float(hold))
     speech = _fade_edges_in_silence(speech, fade_sec)
     # 旁白时长（淡化不改长度）；其对应帧数驱动动效进度，hold/尾垫复用末态
-    narration_frames = max(1, int(math.ceil(len(speech) / float(SAMPLE_RATE) * fps - 1e-9)))
+    narration_frames = max(
+        1, int(math.ceil(len(speech) / float(SAMPLE_RATE) * fps - 1e-9))
+    )
     pad_n = int(round((hold + max(0.0, float(tail_pad))) * SAMPLE_RATE))
     if pad_n > 0:
         speech = np.concatenate([speech, np.zeros(pad_n, dtype=np.float32)])
@@ -716,12 +761,31 @@ def build_parser():
         description="教学微课渲染器（Skill 阶段 2）：分镜 JSON → 校验 → TTS → 动效截帧 → ffmpeg 合成 mp4",
     )
     p.add_argument("storyboard", help="分镜 JSON 路径")
-    p.add_argument("output", nargs="?", default=None, help="输出 mp4 路径（缺省 output/<主名>.mp4）")
-    p.add_argument("--style", default=None, help="换皮名（teaching/classroom/explainer，或自定义 style-<name>.json）")
-    p.add_argument("--reuse-audio", action="store_true", help="复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）")
+    p.add_argument(
+        "output",
+        nargs="?",
+        default=None,
+        help="输出 mp4 路径（缺省 output/<主名>.mp4）",
+    )
+    p.add_argument(
+        "--style",
+        default=None,
+        help="换皮名（teaching/classroom/explainer，或自定义 style-<name>.json）",
+    )
+    p.add_argument(
+        "--reuse-audio",
+        action="store_true",
+        help="复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）",
+    )
     p.add_argument("--no-motion", action="store_true", help="关闭 focus/pulse/zoom")
-    p.add_argument("--preview", action="store_true", help="只截图+溢出探测，不调 TTS/ffmpeg")
-    p.add_argument("--browser", default=None, help="浏览器可执行文件路径（覆盖自动发现 Chrome/Edge）")
+    p.add_argument(
+        "--preview", action="store_true", help="只截图+溢出探测，不调 TTS/ffmpeg"
+    )
+    p.add_argument(
+        "--browser",
+        default=None,
+        help="浏览器可执行文件路径（覆盖自动发现 Chrome/Edge）",
+    )
     return p
 
 
@@ -815,7 +879,9 @@ def main():
                     f"scene {i} TTS 采样率 {rate} != {SAMPLE_RATE}（需 {SAMPLE_RATE}）"
                 )
             if channels != 1:
-                raise RuntimeError(f"scene {i} TTS 声道 {channels} != 1（仅支持单声道）")
+                raise RuntimeError(
+                    f"scene {i} TTS 声道 {channels} != 1（仅支持单声道）"
+                )
             if sampwidth != 2:
                 raise RuntimeError(
                     f"scene {i} TTS 位深 {sampwidth * 8}bit != 16bit（仅支持 16bit）"
@@ -896,6 +962,9 @@ def main():
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
+    ff_stdin, ff_stderr = proc.stdin, proc.stderr
+    if ff_stdin is None or ff_stderr is None:
+        raise RuntimeError("ffmpeg pipe 未初始化")
     gi = 0
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=browser, headless=True)
@@ -914,7 +983,7 @@ def main():
                 apply_motion_css_vars(page, *motion_vars(motion, 0.0))
                 shot = page.screenshot(type="png")
                 for _ in range(n_frames):
-                    proc.stdin.write(shot)
+                    ff_stdin.write(shot)
                     gi += 1
             else:
                 narr_frames = narr_frames_list[i]
@@ -922,11 +991,11 @@ def main():
                     # 旁白对应帧驱动动效进度；hold/尾垫复用末态（音画锁）
                     t = _frame_progress(k, narr_frames)
                     apply_motion_css_vars(page, *motion_vars(motion, t))
-                    proc.stdin.write(page.screenshot(type="png"))
+                    ff_stdin.write(page.screenshot(type="png"))
                     gi += 1
         b.close()
-    proc.stdin.close()
-    err = proc.stderr.read().decode("utf-8", errors="replace")
+    ff_stdin.close()
+    err = ff_stderr.read().decode("utf-8", errors="replace")
     rc = proc.wait()
     print(f"   {gi} 帧 pipe 完成, rc={rc}")
     if rc != 0:
