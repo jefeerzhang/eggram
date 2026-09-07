@@ -3,6 +3,7 @@
 纯函数部分不依赖浏览器/TTS；浏览器相关用 playwright（找不到浏览器时跳过）。
 运行：python -m pytest tests/test_make_video.py -q
 """
+
 import json
 import os
 import shutil
@@ -95,7 +96,13 @@ def test_render_html_escapes_header_sub_zh():
 
 def test_render_html_escape_practice_think_field():
     style = mv.load_style("teaching")
-    base = {"kind": "practice", "header": "h", "sub": "s", "body": "**?**", "narrate": "n"}
+    base = {
+        "kind": "practice",
+        "header": "h",
+        "sub": "s",
+        "body": "**?**",
+        "narrate": "n",
+    }
     # 缺省沿用文案
     assert "先想一想，别急着看答案" in mv.render_html(base, 1280, 720, style)
     # 自定义文本（含特殊字符按字面显示）
@@ -112,10 +119,18 @@ def test_render_html_escape_practice_think_field():
 
 def test_render_html_no_double_substitution():
     # 内容里含 __SUB__ 等槽位 token：不应被后续槽二次解释，也不被误判为残留占位符
-    sc = {"kind": "rule", "header": "__SUB__", "sub": "real", "body": "**B**", "narrate": "n"}
+    sc = {
+        "kind": "rule",
+        "header": "__SUB__",
+        "sub": "real",
+        "body": "**B**",
+        "narrate": "n",
+    }
     html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
     assert "&#95;&#95;SUB&#95;&#95;" in html  # header 里的 __SUB__ 被中和，按字面显示
-    assert html.count("real") == 1  # sub 槽注入一次，header 里的 __SUB__ 不会被替换成 real
+    assert (
+        html.count("real") == 1
+    )  # sub 槽注入一次，header 里的 __SUB__ 不会被替换成 real
     assert not mv.validate_rendered_html(html, 0)  # 不产生残留占位符错误
 
 
@@ -214,7 +229,9 @@ def test_validate_storyboard_accepts_default_and_valid_fps():
 def test_make_video_invalid_fps_does_not_call_tts(monkeypatch):
     tpl = load_sample()
     tpl["fps"] = 0
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".json", delete=False, mode="w", encoding="utf-8"
+    ) as f:
         json.dump(tpl, f, ensure_ascii=False)
         path = f.name
     try:
@@ -267,7 +284,9 @@ def test_candidate_paths_includes_env_override(monkeypatch):
 
 
 def test_build_parser_valid():
-    args = mv.build_parser().parse_args(["x.json", "out.mp4", "--style", "teaching", "--preview"])
+    args = mv.build_parser().parse_args(
+        ["x.json", "out.mp4", "--style", "teaching", "--preview"]
+    )
     assert args.storyboard == "x.json"
     assert args.output == "out.mp4"
     assert args.style == "teaching"
@@ -368,7 +387,13 @@ def browser():
 
 
 def test_browser_text_fidelity(browser):
-    sc = {"kind": "rule", "header": "区间", "sub": "", "body": "区间：**0<x<1**", "narrate": "n"}
+    sc = {
+        "kind": "rule",
+        "header": "区间",
+        "sub": "",
+        "body": "区间：**0<x<1**",
+        "narrate": "n",
+    }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
     assert page.locator(".body").inner_text().strip() == "区间：0<x<1"
@@ -376,7 +401,13 @@ def test_browser_text_fidelity(browser):
 
 
 def test_browser_no_input_element_from_content(browser):
-    sc = {"kind": "rule", "header": "h", "sub": "", "body": "HTML 标签：**<span>** 与 <input>", "narrate": "n"}
+    sc = {
+        "kind": "rule",
+        "header": "h",
+        "sub": "",
+        "body": "HTML 标签：**<span>** 与 <input>",
+        "narrate": "n",
+    }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
     assert page.locator("input").count() == 0
@@ -409,7 +440,9 @@ def test_browser_overflow_reports_top_bound(browser):
     sc = {"kind": "rule", "header": "h", "sub": "s", "body": "**B**", "narrate": "n"}
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
-    page.evaluate("() => { const t = document.querySelector('.title'); t.style.position = 'absolute'; t.style.top = '-100px'; }")
+    page.evaluate(
+        "() => { const t = document.querySelector('.title'); t.style.position = 'absolute'; t.style.top = '-100px'; }"
+    )
     findings = mv.preview_overflow(page, 1280, 720, kind="rule")
     assert any(sel == ".title" for sel, _ in findings)
     page.close()
