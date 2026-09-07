@@ -95,6 +95,12 @@ MOTION_CSS = """
 PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
 # 仅拦样式 hex token；不拦纯数字——教学文本里「100 米」「5 个动作」常见，误伤面太大。
 LEAK_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+# 禁止 layout 在 HTML 节点属性里烘焙视觉样式（font-size/color/background/border）。
+# 这些应走 style token；纯布局间距（margin/padding）允许内联。
+_INLINE_BAKED_STYLE_RE = re.compile(
+    r'style\s*=\s*"[^"]*(?:font-size\s*:|color\s*:|background[^:]*:|border[^:]*:)[^"]*"',
+    re.IGNORECASE,
+)
 
 # 小米 TTS 音色白名单。闸门软提示（非阻塞）；实际拒绝在 TTS 阶段。
 VOICE_WHITELIST = (
@@ -269,6 +275,10 @@ def validate_layouts():
                 errors.append(f"{fn}: 禁止画面进度条/帧计数（发现 {token}）")
         for m in re.finditer(r">\s*(#[0-9a-fA-F]{3,8}|\d{2,3})\s*<", raw):
             errors.append(f"{fn}: 文本节点疑似烘焙了样式值 {m.group(1)!r}")
+        for m in _INLINE_BAKED_STYLE_RE.finditer(raw):
+            errors.append(
+                f"{fn}: HTML 属性 style 烘焙了视觉样式 {m.group(0)[:60]!r}——应走 style token"
+            )
         need = ["__HEADER__"] if kind == "title" else ["__HEADER__", "__BODY__"]
         if kind in ("rule", "example", "mistake", "practice", "answer"):
             need += ["__SUB__", "__BADGE__"]
