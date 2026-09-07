@@ -1,5 +1,5 @@
 """
-make_video.py — 语法微课渲染器（Skill 阶段 2）
+make_video.py — 教学微课渲染器（Skill 阶段 2）
 
 分镜 JSON → 校验 → 小米 TTS → style token 注入 layout → 教学动效截帧 → ffmpeg 合成 mp4
 
@@ -93,7 +93,21 @@ MOTION_CSS = """
 """
 
 PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
-LEAK_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$|^\d{2,3}$")
+# 仅拦样式 hex token；不拦纯数字——教学文本里「100 米」「5 个动作」常见，误伤面太大。
+LEAK_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+# 小米 TTS 音色白名单。闸门软提示（非阻塞）；实际拒绝在 TTS 阶段。
+VOICE_WHITELIST = (
+    "mimo_default",
+    "冰糖",
+    "茉莉",
+    "苏打",
+    "白桦",
+    "Mia",
+    "Chloe",
+    "Milo",
+    "Dean",
+)
 
 
 def load_style(style_name="teaching"):
@@ -288,6 +302,11 @@ _ARC_PHASE = {
 def validate_storyboard(tpl):
     """返回 (errors, warnings)。errors 非空 → 闸门失败；warnings 仅打印。"""
     errors, warnings = [], []
+    voice = tpl.get("voice")
+    if voice is not None and voice not in VOICE_WHITELIST:
+        warnings.append(
+            f"voice={voice!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
+        )
     scenes = tpl.get("scenes") or []
     if not scenes:
         errors.append("scenes 为空")
@@ -340,7 +359,7 @@ def validate_storyboard(tpl):
         if kind == "answer":
             if "**" not in sc.get("body", ""):
                 errors.append(
-                    f"{prefix}: answer（check_reveal）的 body 须用 ** 标出正确语法点"
+                    f"{prefix}: answer（check_reveal）的 body 须用 ** 标出正确知识点"
                 )
         if role and role in ROLE_TO_KIND and ROLE_TO_KIND[role] != kind:
             errors.append(f"{prefix}: role={role} 与 kind={kind} 不一致")
@@ -402,11 +421,33 @@ def validate_rendered_html(html, scene_index):
 
 
 # 关键内容槽选择器（与 templates/layout-*.html 同步）。仅用于 preview 溢出探测。
-_OVERFLOW_SELECTORS = [".header", ".sub", ".body", ".zh", ".badge"]
+# 按 kind 分组——layout 里 header 实际叫 .title/.big/.sum；mistake/practice/answer 的
+# 正文叫 .q（不是 .body）；中文槽按 layout 不同叫 .zh/.why/.think/.explain。
+_OVERFLOW_SELECTORS_BY_KIND = {
+    "title": [".big", ".sub"],
+    "rule": [".title", ".badge", ".sub", ".body"],
+    "example": [".title", ".badge", ".sub", ".en", ".zh"],
+    "mistake": [".title", ".badge", ".sub", ".q", ".why"],
+    "practice": [".title", ".badge", ".sub", ".q", ".think"],
+    "answer": [".title", ".badge", ".sub", ".mark", ".en", ".explain"],
+    "summary": [".sum", ".next"],
+}
+# 兼容旧调用：未传 kind 时取所有选择器的并集。
+_OVERFLOW_SELECTORS = sorted(
+    {s for sels in _OVERFLOW_SELECTORS_BY_KIND.values() for s in sels}
+)
 
 
-def preview_overflow(page, W, H):
-    """在已 set_content 的 page 上测关键槽是否溢出视口。返回 list[(selector, msg)]。"""
+def preview_overflow(page, W, H, kind=None):
+    """在已 set_content 的 page 上测关键槽是否溢出视口。返回 list[(selector, msg)]。
+
+    kind 提供时按 _OVERFLOW_SELECTORS_BY_KIND 取（精确匹配当前 layout 实际类名）；
+    未提供时取所有选择器并集（兼容旧调用）。
+    """
+    if kind is not None and kind in _OVERFLOW_SELECTORS_BY_KIND:
+        selectors = _OVERFLOW_SELECTORS_BY_KIND[kind]
+    else:
+        selectors = _OVERFLOW_SELECTORS
     js = """([W, H, sels]) => {
         const out = [];
         for (const sel of sels) {
@@ -422,7 +463,7 @@ def preview_overflow(page, W, H):
         return out;
     }"""
     out = []
-    for sel, tag, l, t, r, b, txt in page.evaluate(js, [W, H, _OVERFLOW_SELECTORS]):
+    for sel, tag, l, t, r, b, txt in page.evaluate(js, [W, H, selectors]):
         out.append(
             (
                 sel,
@@ -558,7 +599,9 @@ def main():
             "用法: python scripts/make_video.py <分镜.json> [输出.mp4] "
             "[--style NAME] [--reuse-audio] [--no-motion] [--preview]"
         )
-        print("  --reuse-audio  复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）")
+        print(
+            "  --reuse-audio  复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）"
+        )
         print("  --no-motion    关闭 focus/pulse/zoom")
         print("  --preview      只截图+溢出探测，不调 TTS/ffmpeg")
         print("详见 SKILL.md / docs/audio.md / docs/motion.md")
@@ -660,7 +703,9 @@ def main():
             f"{dur:.2f}s ({n_frames}f, hold={hold:.1f}, {src})"
         )
     expected_dur = sum(durs)
-    print(f"   Σ(旁白+hold+尾垫) = {expected_dur:.2f}s  /  {sum(frame_counts)} frames @ {FPS}fps")
+    print(
+        f"   Σ(旁白+hold+尾垫) = {expected_dur:.2f}s  /  {sum(frame_counts)} frames @ {FPS}fps"
+    )
 
     print("3/4 渲染 HTML 画面并合成...")
     n = len(wavs)
@@ -772,7 +817,7 @@ def main():
 
 def _audio_fingerprint(narrate, voice):
     """8 字符内容指纹。voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
-    return hashlib.sha1(f"{voice}|{narrate}".encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha1(f"{voice}|{narrate}".encode()).hexdigest()[:8]
 
 
 def _audio_paths(cache_dir, i, narrate, voice):
@@ -848,16 +893,14 @@ def run_preview(tpl_path, scenes, style, W, H, motion_enabled):
             )
             png = os.path.join(out_dir, f"s{i}.png")
             page.screenshot(path=png, type="png", full_page=False)
-            findings = preview_overflow(page, W, H)
+            findings = preview_overflow(page, W, H, kind=resolve_kind(sc))
             report.append(
                 {
                     "i": i,
                     "kind": resolve_kind(sc),
                     "motion": resolve_motion(sc, motion_enabled),
                     "png": png,
-                    "findings": [
-                        {"sel": sel, "msg": msg} for sel, msg in findings
-                    ],
+                    "findings": [{"sel": sel, "msg": msg} for sel, msg in findings],
                     "placeholder_errs": ph_errs,
                 }
             )
