@@ -1,12 +1,14 @@
-# eggram
+# micro-course
 
-语法微课：把一个英语语法点做成 2–3 分钟的 mp4 短视频。
+> 原名 `eggram`（english grammar 的缩写），从英语语法起步，已扩展到任意适合讲练穿插的知识点。仓库目录沿用 `eggram/` 以保留 git 历史与远程地址。
 
-面向小学六年级到初一学生的语法微课生成器，讲练穿插、一页一概念。**内容先行**——先用「分镜」（storyboard JSON）定内容，再过「闸门」校验，最后渲染成片；两阶段可独立跑。
+教学微课：把一个知识点做成 2–3 分钟的 mp4 短视频。英语语法、数学公式、物理定律、语文修辞——任何适合「讲练穿插、一页一概念」的知识点都可以。
+
+面向中小学的教学微课生成器，讲练穿插、一页一概念。**内容先行**——先用「分镜」（storyboard JSON）定内容，再过「闸门」校验，最后渲染成片；两阶段可独立跑。
 
 ## 特性
 
-- **分镜驱动**：一页一个动作，`**...**` 标出语法点；字段见 [docs/json-schema.md](docs/json-schema.md)
+- **分镜驱动**：一页一个动作，`**...**` 标出知识点；字段见 [docs/json-schema.md](docs/json-schema.md)
 - **教学弧（page-role）**：`title → rule+ → example+ → practice → answer → summary` 必选弧；推荐在 `practice` 前加 `mistake`，先讲后练再揭晓
 - **闸门校验**：教学弧顺序 + `practice.hold >= 3.0` 硬门槛，渲染前必过
 - **换皮**：teaching / classroom / explainer 三套皮肤，只改 style，不动内容与版式
@@ -62,7 +64,7 @@ python scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--
 eggram/
 ├── SKILL.md                     # Agent 入口（micro-video）
 ├── AGENTS.md                    # Agent 上下文指针
-├── examples/                    # 分镜样例（语法点 JSON）
+├── examples/                    # 分镜样例（知识点 JSON；当前示例为「现在进行时」语法学科）
 ├── scripts/
 │   ├── make_video.py            # 渲染管线：预览 → TTS → 截帧 → ffmpeg
 │   └── validate_storyboard.py   # 闸门校验

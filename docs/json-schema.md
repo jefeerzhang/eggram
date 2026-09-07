@@ -5,8 +5,8 @@
 ## 顶层
 
 | 字段 | 必填 | 说明 |
-|---|---|---|
-| title | ✅ | 语法点名 |
+| --- | --- | --- |
+| title | ✅ | 知识点名 |
 | voice | ✅ | 小米 TTS：mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean |
 | style | | `teaching` / `classroom` / `explainer`；CLI `--style` 可覆盖 |
 | motion | | 顶层 bool，默认 true |
@@ -16,13 +16,13 @@
 ## scenes[]
 
 | 字段 | 必填 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | kind | ✅* | title / rule / example / mistake / practice / answer / summary |
 | role | | *page-role*；可代替 kind；与 kind 同写须一致 |
 | motion | | focus / pulse / zoom_in / zoom_out / none；默认见 [`motion.md`](motion.md) |
 | header | ✅ | 「学习者此刻做什么」 |
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
-| body | ✅ | 主体；`**...**` = 高亮语法点 |
+| body | ✅ | 主体；`**...**` = 高亮知识点 |
 | narrate | ✅ | TTS 口语短句 |
 | hold | practice | ≥3.0（样例 3.0） |
 | zh | | example/mistake 说明（缺省用 sub） |
@@ -32,7 +32,7 @@
 ## kind → layout（整页居中）
 
 | kind | layout |
-|---|---|
+| --- | --- |
 | title | layout-title.html |
 | rule | layout-rule.html |
 | example | layout-example.html |
@@ -44,7 +44,7 @@
 ## `**` 高亮色（style token）
 
 | kind | token |
-|---|---|
+| --- | --- |
 | practice / mistake | wrong |
 | example / answer | correct |
 | rule / title / summary | accent |

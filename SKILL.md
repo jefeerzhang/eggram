@@ -1,8 +1,8 @@
 ---
 name: micro-video
 description: >
-  语法微课：把一个英语语法点做成 2–3 分钟 mp4（分镜 JSON → 闸门校验 → TTS/HTML 渲染）。
-  触发：给孩子做语法课、语法短视频、讲练穿插微课、某时态/句型做成视频、重渲/换皮已有分镜。
+  教学微课：把一个知识点做成 2–3 分钟 mp4（分镜 JSON → 闸门校验 → TTS/HTML 渲染）。
+  触发：给孩子做教学课、教学短视频、讲练穿插微课、某语法点/公式/定律/句型做成视频、重渲/换皮已有分镜。
 ---
 
 # micro-video
@@ -65,7 +65,7 @@ python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--s
 ## 改哪里（branch → 文件）
 
 | Branch | 打开 |
-|---|---|
+| --- | --- |
 | 写/改一课内容 | *分镜* JSON → *闸门* → 阶段 2 |
 | *换皮* | JSON `"style"` 或 `--style`；[`docs/styles.md`](docs/styles.md) |
 | 新皮 | 只加 `templates/style-<name>.json` |

@@ -1,7 +1,7 @@
 {
   "style_id": "grammar-explainer",
   "kind": "style",
-  "source": "eggram; ppt-master science-explainer paper-cut / light density",
+  "source": "micro-course; ppt-master science-explainer paper-cut / light density",
   "summary": "科普解说皮：浅纸色、更大字号与留白感、青蓝强调；适合类比与易错纠偏。",
   "inspired_by": "ppt-master/templates/styles/science-explainer",
   "palette": {

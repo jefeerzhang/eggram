@@ -1,7 +1,7 @@
 {
   "style_id": "grammar-classroom",
   "kind": "style",
-  "source": "eggram; ppt-master workshop-teaching light/calm defaults",
+  "source": "micro-course; ppt-master workshop-teaching light/calm defaults",
   "summary": "浅色课堂皮：纸质暖白底、蓝强调；正确绿/错误红语义不变；适合白天、板书感。",
   "inspired_by": "ppt-master/templates/styles/workshop-teaching",
   "palette": {

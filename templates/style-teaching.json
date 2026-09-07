@@ -1,8 +1,8 @@
 {
   "style_id": "grammar-dark",
   "kind": "style",
-  "source": "eggram; ppt-master workshop-teaching dark variant",
-  "summary": "深色语法微课视觉：强调色标新/变，绿色标正确，红色标错误；练习页虚线框与讲解页可扫区分。",
+  "source": "micro-course; ppt-master workshop-teaching dark variant",
+  "summary": "深色教学微课视觉：强调色标新/变，绿色标正确，红色标错误；练习页虚线框与讲解页可扫区分。",
   "inspired_by": "ppt-master/templates/styles/workshop-teaching",
   "palette": {
     "bg": "#14171d",
