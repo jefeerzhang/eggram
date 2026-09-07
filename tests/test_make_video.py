@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """make_video.py 的 8 张 P2 缺陷票回归测试。
 
 纯函数部分不依赖浏览器/TTS；浏览器相关用 playwright（找不到浏览器时跳过）。
@@ -6,10 +5,10 @@
 """
 import json
 import os
+import shutil
 import struct
 import sys
 import tempfile
-import wave
 
 import numpy as np
 import pytest
@@ -25,6 +24,20 @@ SAMPLE = os.path.join(ROOT, "examples", "now_progressing.json")
 def load_sample():
     with open(SAMPLE, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _minimal_layout(kind):
+    """构造能过 validate_layouts 必要槽位检查的极简 layout（仅用于测试）。"""
+    slots = ["__HEADER__", "__BG__", "__ACCENT__", "__INK__"]
+    if kind == "title":
+        pass
+    elif kind == "summary":
+        slots = ["__BODY__", "__SUB__", "__BG__", "__ACCENT__", "__INK__"]
+    else:
+        slots += ["__BODY__", "__SUB__", "__BADGE__"]
+        if kind in ("example", "mistake"):
+            slots += ["__ZH__"]
+    return " ".join(slots)
 
 
 def wav_bytes(pcm, rate=24000, channels=1, sampwidth=2, extra_list=False):
@@ -288,6 +301,48 @@ def test_build_parser_help_exits_zero(capsys):
 def test_validate_layouts_requires_think_slot():
     errs = mv.validate_layouts()
     assert not any("__THINK__" in e for e in errs)
+
+
+def test_validate_layouts_rejects_inline_baked_style(monkeypatch):
+    """layout HTML 属性烘焙视觉样式应被闸门拦下（应走 style token；见 ea2d727）。
+
+    不依赖 pytest tmp_path fixture（pytest 自带的临时目录清理撞上 Windows
+    老 lock 时会 PermissionError），改用 tempfile.mkdtemp() 自己管理。
+    """
+    tmp = tempfile.mkdtemp(prefix="mv_layout_baked_")
+    try:
+        for kind, fn in mv.LAYOUT_FILES.items():
+            with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
+                f.write(_minimal_layout(kind))
+        # 给 layout-rule.html 加内联 font-size（最常见的回归场景）
+        path = os.path.join(tmp, "layout-rule.html")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('<div style="font-size:30px">x</div>')
+        monkeypatch.setattr(mv, "TEMPLATE_DIR", tmp)
+        errs = mv.validate_layouts()
+        assert any(
+            "HTML 属性 style 烘焙" in e and "layout-rule.html" in e for e in errs
+        ), f"expected inline-style rejection, got: {errs}"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_validate_layouts_allows_margin_padding(monkeypatch):
+    """纯布局间距（margin/padding）允许内联，不应误伤。"""
+    tmp = tempfile.mkdtemp(prefix="mv_layout_margin_")
+    try:
+        for kind, fn in mv.LAYOUT_FILES.items():
+            with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
+                f.write(_minimal_layout(kind))
+        # 给 layout-title.html 加内联 margin-top（应通过）
+        path = os.path.join(tmp, "layout-title.html")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('<div style="margin-top:26px">x</div>')
+        monkeypatch.setattr(mv, "TEMPLATE_DIR", tmp)
+        errs = mv.validate_layouts()
+        assert not any("HTML 属性 style 烘焙" in e for e in errs), errs
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_sample_passes_think_and_escape():
