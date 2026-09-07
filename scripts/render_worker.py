@@ -37,10 +37,8 @@ def tail(text, n):
 
 def emit(status, artifact=None, verify=None, diagnostic=None):
     print(f"status: {status}")
-    if artifact:
-        print(f"artifact: {artifact}")
-    if verify:
-        print(f"verify: {verify}")
+    print(f"artifact: {artifact or '(none)'}")
+    print(f"verify: {verify or '(none)'}")
     if diagnostic:
         print(f"diagnostic:\n{diagnostic}")
 

@@ -6,6 +6,7 @@
 全过 → stdout `PREVIEW_OK <n> frames`、exit 0；任一失败 → 诊断、exit 2（FAIL_AT_PREVIEW）。
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -24,11 +25,16 @@ def fail(msg, out=""):
 
 
 def main():
-    if len(sys.argv) < 2:
-        fail("缺少参数: <storyboard.json> [output_path]")
-    storyboard = sys.argv[1]
+    ap = argparse.ArgumentParser(
+        prog="worker_preview.py", description="render worker Step 2 预览闸门"
+    )
+    ap.add_argument("storyboard", help="分镜 JSON 路径")
+    ap.add_argument("output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4")
+    args = ap.parse_args()
+
+    storyboard = args.storyboard
     slug = os.path.splitext(os.path.basename(storyboard))[0]
-    output = sys.argv[2] if len(sys.argv) > 2 else f"output/_preview_{slug}.mp4"
+    output = args.output or f"output/_preview_{slug}.mp4"
 
     # 1) make_video --preview：exit 1=溢出，2=占位符闸门失败（均归 FAIL_AT_PREVIEW）
     r = subprocess.run(
