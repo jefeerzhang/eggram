@@ -25,3 +25,8 @@ _*.py
 Thumbs.db
 .idea/
 .vscode/
+
+# examples: 仅作个人用。首支 demo (now_progressing.json) 保留作项目能力示例，
+# 后续主题视频的分镜不再入栈——本地写分镜 → 渲染 mp4 → 自家娃看。
+# 已 tracked 的 examples/*.json 不受影响（gitignore 仅对未来新增的未追踪文件生效）。
+examples/*
