@@ -1,0 +1,81 @@
+{
+  "title": "什么是 Harness",
+  "voice": "白桦",
+  "style": "teaching",
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "scenes": [
+    {
+      "kind": "title",
+      "header": "什么是 Harness",
+      "sub": "AI 编码工具背后的骨架",
+      "body": "[harness]什么是 **Harness**",
+      "narrate": "什么是 Harness？它是给 AI 模型装上的手脚和记忆，让它从会说话的工具，变成能动手干活的工程。"
+    },
+    {
+      "kind": "rule",
+      "motion": "pulse",
+      "header": "定义",
+      "sub": "模型 + 工具 + 上下文 + 编排",
+      "body": "[harness]**Harness** = **模型** + **工具** + **上下文** + **编排**",
+      "narrate": "Harness 中文可以叫脚手架。它不是模型本身，而是模型之外那一整套让它能持续干活的层。"
+    },
+    {
+      "kind": "rule",
+      "motion": "pulse",
+      "header": "四要素",
+      "sub": "缺一不可",
+      "body": "[brain]**模型** · [wrench]**工具** · [memory]**上下文** · [cycle]**编排**",
+      "narrate": "四个要素，缺一不可：模型是大脑，工具是手脚，上下文是记忆，编排是循环。"
+    },
+    {
+      "kind": "rule",
+      "motion": "pulse",
+      "header": "工作循环",
+      "sub": "一次走完一轮",
+      "body": "[brain]**思考** → [wrench]**调工具** → [memory]**观察** → [cycle]**再决定**",
+      "narrate": "模型拿到任务，先思考，再调工具，看结果，决定下一步。这就是 harness 的核心循环。"
+    },
+    {
+      "kind": "example",
+      "motion": "pulse",
+      "header": "实际产品",
+      "sub": "你用过的都是 Harness",
+      "body": "[harness]**Claude Code** / **Cursor** / **pi**",
+      "narrate": "举个例：你用过的 Claude Code、Cursor，还有我们这个 pi，本质上都是 Harness——把模型包起来，给它工具，给它记忆。"
+    },
+    {
+      "kind": "mistake",
+      "header": "常见误解",
+      "sub": "harness 不等于 prompt",
+      "zh": "harness 是整套工程，不是单条提示词",
+      "body": "[cross]\"我用 **prompt** 就够了\" — 错",
+      "narrate": "常见误解：觉得 harness 就是写一条好的 prompt。其实 prompt 只是四要素里上下文的一部分，远不是全部。"
+    },
+    {
+      "kind": "practice",
+      "header": "反观 30 秒",
+      "sub": "记忆 · 动作 · 循环",
+      "body": "[pencil]想想你常用的 **AI 工具**",
+      "think": "",
+      "narrate": "接下来三秒，反观你常用的 AI 工具，看它有没有这三样：记忆、动作、循环。",
+      "hold": 3.0
+    },
+    {
+      "kind": "answer",
+      "motion": "pulse",
+      "header": "本质",
+      "sub": "把碎片拼成工程",
+      "body": "[check]**Harness = 让 AI 从聊天变干活**",
+      "narrate": "揭晓：harness 的本质，是把模型的脑子接上手脚，再给一份长期记忆。prompt 只是其中一行字。"
+    },
+    {
+      "kind": "summary",
+      "header": "一句话带走",
+      "sub": "harness = 四合一",
+      "body": "[bookmark]**模型** + **工具** + **上下文** + **编排**",
+      "narrate": "记住这一条：harness 是模型加工具加上下文加编排，四合一。下次有人问你什么是 harness，你就答这四个字。"
+    }
+  ]
+}

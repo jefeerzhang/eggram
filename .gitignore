@@ -26,7 +26,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# examples: 仅作个人用。首支 demo (now_progressing.json) 保留作项目能力示例，
-# 后续主题视频的分镜不再入栈——本地写分镜 → 渲染 mp4 → 自家娃看。
-# 已 tracked 的 examples/*.json 不受影响（gitignore 仅对未来新增的未追踪文件生效）。
+# examples: 教学 demo 例。已 tracked 的 3 个示例覆盖三类内容：
+#   语法 (now_progressing) / 经管 (rational_actor) / 概念讲解 (what_is_harness)
+# 保留作项目能力示例；后续个人 lesson 本地写分镜 → 渲染 mp4 → 自家娃看，不入栈。
+# gitignore 仅对未来新增的未追踪文件生效。
 examples/*

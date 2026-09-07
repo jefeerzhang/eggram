@@ -14,6 +14,21 @@
 - **换皮**：teaching / classroom / explainer 三套皮肤，只改 style，不动内容与版式
 - **音画锁**：音轨时长与画面帧对齐，hold 段静音；音频按课目录 + 旁白/音色指纹缓存，防串课
 - **克制动效**：focus / pulse / zoom，把眼睛送到高亮与结论
+- **inline 图标**：body 支持 `[name]**词**` token，inline SVG 自动嵌入高亮 span，跟 pulse 同步缩放/发光
+
+## 展示
+
+![四要素带图标](docs/screenshots/harness_four_elements.png)
+
+↑ 1 页浓缩展示：分镜结构 + 教学弧 + pulse 动效 + inline 图标系统。
+
+仓库包含 3 个分镜 demo，覆盖三类内容场景：
+
+| 示例 | 学科 / 场景 | 一句话 |
+| --- | --- | --- |
+| [examples/now_progressing.json](examples/now_progressing.json) | 英语语法 | 现在进行时讲解（首支 demo） |
+| [examples/rational_actor.json](examples/rational_actor.json) | 经管社科 | 理性经济人 |
+| [examples/what_is_harness.json](examples/what_is_harness.json) | 概念讲解 | 什么是 Harness（4 个组件各配 inline 图标） |
 
 ## 快速开始
 
@@ -25,10 +40,11 @@
 
 ### 写分镜
 
-分镜是教学内容本体（JSON），示例见 [examples/now_progressing.json](examples/now_progressing.json)。写完后先过闸门：
+分镜是教学内容本体（JSON），示例见上方「展示」段表格。写完后先过闸门（任选一个 demo 验证）：
 
 ```bash
 py scripts/validate_storyboard.py examples/now_progressing.json
+# 或：examples/rational_actor.json / examples/what_is_harness.json
 ```
 
 退出码 0 表示通过。
@@ -66,7 +82,7 @@ py scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--styl
 eggram/
 ├── SKILL.md                     # Agent 入口（micro-video）
 ├── AGENTS.md                    # Agent 上下文指针
-├── examples/                    # 分镜样例（知识点 JSON；当前示例为「现在进行时」语法学科）
+├── examples/                    # 分镜样例（3 个 demo：语法 / 经管 / 概念讲解）
 ├── scripts/
 │   ├── make_video.py            # 渲染管线：预览 → TTS → 截帧 → ffmpeg
 │   └── validate_storyboard.py   # 闸门校验
