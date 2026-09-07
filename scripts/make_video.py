@@ -641,11 +641,19 @@ def write_wav_pcm(path, pcm, rate=SAMPLE_RATE):
     import wave
 
     pcm = np.asarray(pcm, dtype=np.int16)
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
+    # 先写临时文件再 os.replace 原子落位：并行 worker（同 slug 换皮批）对同一
+    # 确定性内容的并发读写不再产生撕裂（读方要么旧文件要么新文件，都是完整的）。
+    tmp = f"{path}.tmp{os.getpid()}"
+    try:
+        with wave.open(tmp, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(pcm.tobytes())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _speech_bounds(speech, floor=SPEECH_FLOOR):
@@ -786,6 +794,11 @@ def build_parser():
         default=None,
         help="浏览器可执行文件路径（覆盖自动发现 Chrome/Edge）",
     )
+    p.add_argument(
+        "--preview-dir",
+        default=None,
+        help="预览截图/溢出报告目录（缺省 _build/preview/<slug>/；并行换皮按 style 隔开）",
+    )
     return p
 
 
@@ -849,7 +862,9 @@ def main():
 
     # 预览闸门：缩略图 + 溢出；--preview 到此结束
     print("1/4 预览截图与溢出...")
-    preview_rc = run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser)
+    preview_rc = run_preview(
+        tpl_path, scenes, style, W, H, motion_enabled, browser, args.preview_dir
+    )
     if args.preview:
         sys.exit(preview_rc)
     if preview_rc != 0:
@@ -1074,10 +1089,19 @@ def _ffprobe_duration(path):
     return None
 
 
-def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser):
+def run_preview(
+    tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir=None
+):
     """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。"""
     lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
-    out_dir = os.path.join(ROOT, "_build", "preview", lesson_key)
+    if preview_dir:
+        out_dir = (
+            preview_dir
+            if os.path.isabs(preview_dir)
+            else os.path.join(ROOT, preview_dir)
+        )
+    else:
+        out_dir = os.path.join(ROOT, "_build", "preview", lesson_key)
     os.makedirs(out_dir, exist_ok=True)
     print(f"   → {out_dir}")
     report = []

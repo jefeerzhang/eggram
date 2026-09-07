@@ -59,7 +59,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 ### 验收
 
 - *闸门* 绿（含教学弧顺序；`practice.hold >= 3.0`）
-- 预览：`_build/preview/<slug>/s*.png` 无文字溢出
+- 预览：`_build/preview/<slug>/s*.png` 无文字溢出（worker 换皮批并行时按 style 隔离为 `<slug>__<style>/`，见 #18）
 - 画面：教学内容、整页居中、易错/练习可扫区分
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）
 - 音频：`hold` 段为静音；段间接缝干净；成片时长 ≈ Σ(旁白+hold)（*音画锁*）
