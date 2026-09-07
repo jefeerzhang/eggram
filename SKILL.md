@@ -20,8 +20,10 @@ description: >
 **Done when：** `examples/<point_slug>.json` 存在，且：
 
 ```bash
-python scripts/validate_storyboard.py examples/<point_slug>.json
+py scripts/validate_storyboard.py examples/<point_slug>.json
 ```
+
+> Windows 用户用 `py` 启动器；macOS/Linux 用 `python3`（下文示例同此约定）。
 
 退出码 0。
 
@@ -43,14 +45,14 @@ python scripts/validate_storyboard.py examples/<point_slug>.json
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
 ```bash
-python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview]
+py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview]
 ```
 
 默认输出 `output/<json 主名>.mp4`。`--style` 覆盖换皮；`--reuse-audio` 按课目录 + 旁白/音色指纹复用 raw（[`docs/audio.md`](docs/audio.md)）；`--preview` 只出缩略图与溢出报告；动效见 [`docs/motion.md`](docs/motion.md)。
 
 管线：二次 *闸门* → **预览截图/溢出**（未过则停）→ TTS/`prepare_scene_audio` → 时长核验 → motion 截帧 → ffmpeg。`--preview` 在预览后退出。
 
-环境：`python` + playwright + imageio_ffmpeg + numpy；本机 Chrome/Edge；环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`）。
+环境：Python 3.11+；Windows 用户须用 `py` 启动器（`python` 在 WindowsApps 桩上静默 exit 49、零输出），macOS/Linux 用 `python3`；playwright + imageio_ffmpeg + numpy；本机 Chrome/Edge；环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`）。
 
 ### 验收
 
@@ -78,6 +80,6 @@ python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--s
 | 闸门规则 / 教学文本转义 | `scripts/make_video.py`（`validate_storyboard` / `validate_layouts` / `_escape`）+ `templates/layout-*.html` |
 | 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |
 | 加回归测试 | `tests/test_make_video.py` |
-| 跑全量回归 | `python -m pytest tests/` |
+| 跑全量回归 | `py -m pytest tests/` |
 
 **契约：** *分镜* 只承载教学内容；style 只承载视觉 token；layout 只承载结构槽与居中构图。渲染前必过 *闸门*。

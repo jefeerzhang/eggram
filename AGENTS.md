@@ -17,4 +17,4 @@
 | 本地 issues | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
 | domain / ADR | [`docs/agents/domain.md`](docs/agents/domain.md) |
 
-命令与 flag：以 `SKILL.md` 阶段 2 与 `python scripts/make_video.py --help` 为准。
+命令与 flag：以 `SKILL.md` 阶段 2 与 `py scripts/make_video.py --help` 为准（Windows 用 `py` 启动器；macOS/Linux 用 `python3`，详见 SKILL.md 环境说明）。

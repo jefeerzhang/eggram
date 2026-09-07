@@ -19,7 +19,7 @@
 
 ### 环境要求
 
-- Python 3（依赖 playwright、imageio_ffmpeg、numpy）
+- Python 3.11+（依赖 playwright、imageio_ffmpeg、numpy）；Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默 exit 49、零输出），macOS/Linux 用 `python3`
 - 本机 Chrome / Edge（自动发现；也可用 `--browser <路径>` 或环境变量 `BROWSER_PATH`/`CHROME_PATH` 显式指定）
 - 环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`），用于 TTS 配音
 
@@ -28,7 +28,7 @@
 分镜是教学内容本体（JSON），示例见 [examples/now_progressing.json](examples/now_progressing.json)。写完后先过闸门：
 
 ```bash
-python scripts/validate_storyboard.py examples/now_progressing.json
+py scripts/validate_storyboard.py examples/now_progressing.json
 ```
 
 退出码 0 表示通过。
@@ -36,7 +36,7 @@ python scripts/validate_storyboard.py examples/now_progressing.json
 ### 渲视频
 
 ```bash
-python scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview] [--browser PATH]
+py scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview] [--browser PATH]
 ```
 
 - 默认输出 `output/<分镜主名>.mp4`

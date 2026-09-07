@@ -3,7 +3,7 @@
 *换皮* = 只改 `templates/style-*.json`（或 JSON/`--style`），layout 与 *分镜* 不动。*page-role* 见 [`teaching-method.md`](teaching-method.md)。
 
 | style | 文件 | 观感 | 选用 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `teaching` | style-teaching.json | 深底橙强调 | 默认短视频 |
 | `classroom` | style-classroom.json | 暖白蓝强调 | 课堂/板书 |
 | `explainer` | style-explainer.json | 浅纸青蓝、字更大 | 类比/纠错 |
@@ -13,9 +13,11 @@
 ```
 
 ```bash
-python scripts/make_video.py examples/now_progressing.json out.mp4 --style explainer --reuse-audio
-# 先看页：python scripts/make_video.py examples/now_progressing.json --preview --style explainer
+py scripts/make_video.py examples/now_progressing.json out.mp4 --style explainer --reuse-audio
+# 先看页：py scripts/make_video.py examples/now_progressing.json --preview --style explainer
 ```
+
+> Windows 用 `py` 启动器；macOS/Linux 用 `python3`。
 
 新皮：新增 `templates/style-<name>.json`，token 齐备（palette / typography / exercise）；layout 继续只服务 kind。
 

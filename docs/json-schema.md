@@ -55,5 +55,7 @@
 
 - *分镜* 字段 = 教学内容；色值/字号 ∈ `style-*.json`
 - layout = 结构槽 `__HEADER__` / `__BODY__` / `__THINK__`（仅 practice） / … + 居中构图
-- *闸门*：`python scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=3.0`；exit 0）
-- 预览：`python scripts/make_video.py <json> --preview`（缩略图 + 溢出）；全量渲染会先跑同一预览，通过后再 TTS
+- *闸门*：`py scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=3.0`；exit 0）
+- 预览：`py scripts/make_video.py <json> --preview`（缩略图 + 溢出）；全量渲染会先跑同一预览，通过后再 TTS
+
+> Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默失败、零输出）；macOS/Linux 用 `python3`。
