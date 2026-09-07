@@ -74,5 +74,10 @@ python scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--s
 | 卡顿/hold/拼接 | [`docs/audio.md`](docs/audio.md) + `prepare_scene_audio` |
 | 字段/高亮色 | [`docs/json-schema.md`](docs/json-schema.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
+| CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
+| 闸门规则 / 教学文本转义 | `scripts/make_video.py`（`validate_storyboard` / `validate_layouts` / `_escape`）+ `templates/layout-*.html` |
+| 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |
+| 加回归测试 | `tests/test_make_video.py` |
+| 跑全量回归 | `python -m pytest tests/` |
 
 **契约：** *分镜* 只承载教学内容；style 只承载视觉 token；layout 只承载结构槽与居中构图。渲染前必过 *闸门*。

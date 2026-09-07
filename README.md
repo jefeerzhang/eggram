@@ -70,6 +70,7 @@ eggram/
 ├── scripts/
 │   ├── make_video.py            # 渲染管线：预览 → TTS → 截帧 → ffmpeg
 │   └── validate_storyboard.py   # 闸门校验
+├── tests/                       # 回归测试（test_make_video.py，pytest）
 ├── templates/
 │   ├── layout-*.html            # 每种 kind 的版式槽
 │   └── style-*.json             # 皮肤（视觉 token）
