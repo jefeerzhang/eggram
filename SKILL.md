@@ -42,6 +42,8 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 ## 阶段 2 — 渲视频
 
+> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。
+
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
 ```bash
@@ -61,6 +63,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 - 画面：教学内容、整页居中、易错/练习可扫区分
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）
 - 音频：`hold` 段为静音；段间接缝干净；成片时长 ≈ Σ(旁白+hold)（*音画锁*）
+- worker 模式：前两项由 5 项自动验收（`verify: [✓✓✓✓✓]`）替代人工勾选；画面内容/动效体感/音频接缝 3 项仍需人看
 
 ---
 
@@ -77,6 +80,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 字段/高亮色 | [`docs/json-schema.md`](docs/json-schema.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
 | CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
+| 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight/preview/verify.py`；契约 `.scratch/render-worker/` |
 | 闸门规则 / 教学文本转义 | `scripts/make_video.py`（`validate_storyboard` / `validate_layouts` / `_escape`）+ `templates/layout-*.html` |
 | 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |
 | 加回归测试 | `tests/test_make_video.py` |
