@@ -67,9 +67,9 @@
       "kind": "practice",
       "role": "understanding_check",
       "header": "练习时间",
-      "sub": "先想一想，这句话对吗？",
-      "body": "He is **watch** TV. ?",
-      "narrate": "请判断：He is watch TV. 这句话对还是不对？先想一想。",
+      "sub": "再判断一句，对吗？",
+      "body": "She is **play** piano. ?",
+      "narrate": "再来一句：She is play piano. 这句话对还是不对？想一下。",
       "hold": 3.0
     },
     {
@@ -77,8 +77,8 @@
       "role": "check_reveal",
       "header": "揭晓",
       "sub": "动词要加 ing",
-      "body": "He is **watching** TV. ✓",
-      "narrate": "不对。正确的应该是 He is watching TV. 动词要加 ing。"
+      "body": "She is **playing** piano. ✓",
+      "narrate": "不对。正确是 She is playing piano. 动词 play 要变成 playing。"
     },
     {
       "kind": "summary",
