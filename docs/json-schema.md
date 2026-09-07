@@ -10,7 +10,8 @@
 | voice | ✅ | 小米 TTS：mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean |
 | style | | `teaching` / `classroom` / `explainer`；CLI `--style` 可覆盖 |
 | motion | | 顶层 bool，默认 true |
-| fps / width / height | | 默认 30、1280×720 |
+| fps | | 正整数，默认 30（0、负数、布尔、非整数 → *闸门* 拒绝） |
+| width / height | | 默认 1280×720 |
 | scenes | ✅ | 分镜数组 |
 
 ## scenes[]
@@ -26,6 +27,7 @@
 | narrate | ✅ | TTS 口语短句 |
 | hold | practice | ≥3.0（样例 3.0） |
 | zh | | example/mistake 说明（缺省用 sub） |
+| think | | practice 提示语；缺省「先想一想，别急着看答案」；空字符串隐藏提示与间距 |
 
 \* 可只写 `role`。
 

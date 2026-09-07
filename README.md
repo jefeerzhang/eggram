@@ -20,7 +20,7 @@
 ### 环境要求
 
 - Python 3（依赖 playwright、imageio_ffmpeg、numpy）
-- 本机 Chrome / Edge
+- 本机 Chrome / Edge（自动发现；也可用 `--browser <路径>` 或环境变量 `BROWSER_PATH`/`CHROME_PATH` 显式指定）
 - 环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`），用于 TTS 配音
 
 ### 写分镜
@@ -36,13 +36,15 @@ python scripts/validate_storyboard.py examples/now_progressing.json
 ### 渲视频
 
 ```bash
-python scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview]
+python scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--style NAME] [--reuse-audio] [--no-motion] [--preview] [--browser PATH]
 ```
 
 - 默认输出 `output/<分镜主名>.mp4`
 - `--style` 覆盖换皮
 - `--reuse-audio` 复用已生成的旁白（指纹命中才复用，详见 [docs/audio.md](docs/audio.md)）
 - `--preview` 只出缩略图与溢出报告，不调 TTS / ffmpeg
+- `--browser` 显式指定浏览器可执行文件（Chrome / Edge），否则自动发现
+- 参数严格解析：未知参数、多余位置参数、缺失选项值会在任何流水线步骤前报错退出
 
 建议先跑一次 `--preview` 确认没有文字溢出，再全量渲染。
 
