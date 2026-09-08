@@ -27,7 +27,9 @@ def main():
         prog="worker_preview.py", description="render worker Step 2 预览闸门"
     )
     ap.add_argument("storyboard", help="分镜 JSON 路径")
-    ap.add_argument("output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4")
+    ap.add_argument(
+        "output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4"
+    )
     ap.add_argument("--preview-dir", default=None, help="自定义预览截图目录")
     args = ap.parse_args()
 
@@ -71,8 +73,7 @@ def main():
         )
         fail(f"溢出报告非空: {len(bad)}/{len(report)} 页（{report_path}）", lines)
 
-    print(f"PREVIEW_OK {n_scenes} frames")
-    print(f"截图目录: {check_dir}")
+    print(f"PREVIEW_OK {n_scenes} frames → {check_dir}")
 
 
 if __name__ == "__main__":
