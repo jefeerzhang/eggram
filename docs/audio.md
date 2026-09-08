@@ -5,12 +5,21 @@
 ## 缓存（防串课）
 
 路径：`_build/<lesson_slug>/s{i}_{fp}_raw.wav`  
-`lesson_slug` = 分镜 JSON 主名；`fp` = `sha1(voice|narrate)[:8]`。
+`lesson_slug` = 分镜 JSON 主名；`fp` = `sha256(voice|narrate)[:8]`。
 
 - 旁白或音色变 → 指纹变 → 不复用旧文件
 - 换皮（`--style`）不进指纹，不重 TTS
 - `--reuse-audio` 仅在 raw + `.meta.json` 与旁白/音色一致时命中；无 meta 的旧共享缓存一律 miss
 - meta 写有 `ver = CACHE_VERSION`（`scripts/make_video.py` 中常量，初始 `"2"`）；与当前值不一致则失效，解码逻辑改了旧缓存自动 miss
+
+## 对话模式（多音色）
+
+分镜支持 `voices` 映射 + 每页 `voice` 覆盖，实现男女生对话式教学：
+
+- 顶层 `voices`：`{"narrator": "苏打", "student": "冰糖"}`
+- 每页 `voice`：角色 ID（如 `"narrator"`）或直接音色名（如 `"苏打"`）
+- 缓存指纹含实际音色名（非角色 ID），换角色映射自动重 TTS
+- 同一课的不同页可用不同音色，ffmpeg `concat` 自然拼接
 
 ## 管线（`prepare_scene_audio`）
 

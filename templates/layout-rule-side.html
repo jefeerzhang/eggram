@@ -1,0 +1,27 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box}
+body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__BG2__ 100%);font-family:__FONT__;color:__INK__;overflow:hidden}
+.stage{position:relative;width:100%;height:100%;padding:36px 60px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center}
+.hd{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:8px}
+.title{font-size:__TITLE_SIZE__px;font-weight:800;color:__INK__;letter-spacing:1px}
+.badge{font-size:__BADGE_SIZE__px;color:__ACCENT__;border:1.5px solid __ACCENT__;border-radius:999px;padding:4px 16px;white-space:nowrap;opacity:.92}
+.rule{width:56px;height:3px;background:__ACCENT__;border-radius:2px;margin:8px 0 4px}
+.sub{font-size:__SUB_SIZE__px;color:__INK_SUB__;letter-spacing:.5px;max-width:920px;margin-bottom:12px}
+.columns{display:flex;gap:28px;width:100%;max-width:1120px;flex:1;min-height:0}
+.col-rule{flex:1.1;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:22px;padding:28px 32px;box-shadow:0 4px 20px rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center}
+.col-example{flex:0.9;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:22px;padding:28px 32px;box-shadow:0 4px 20px rgba(0,0,0,0.18);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.body{font-size:__BODY_SIZE__px;line-height:1.6;font-weight:500;text-align:center}
+.hl{color:__ACCENT__;font-weight:800}
+.err{color:__WRONG__;font-weight:800}
+.example-label{font-size:__BADGE_SIZE__px;color:__CORRECT__;border:1px solid __CORRECT__;border-radius:999px;padding:3px 14px;white-space:nowrap}
+.example-text{font-size:calc(__BODY_SIZE__px * 0.85);line-height:1.5;font-weight:600;text-align:center}
+</style></head><body>
+<div class="stage">
+  <div class="hd"><div class="title">__HEADER__</div><div class="badge">__BADGE__</div></div>
+  <div class="rule"></div>
+  <div class="sub">__SUB__</div>
+  <div class="columns">
+    <div class="col-rule"><div class="body">__BODY__</div></div>
+    <div class="col-example"><div class="example-label">示例</div><div class="example-text">__ZH__</div></div>
+  </div>
+</div>
+</body></html>

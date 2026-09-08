@@ -5,22 +5,20 @@
   "summary": "深色教学微课视觉：强调色标新/变，绿色标正确，红色标错误；练习页虚线框与讲解页可扫区分。",
   "inspired_by": "ppt-master/templates/styles/workshop-teaching",
   "palette": {
-    "bg": "#14171d",
-    "bg_grad2": "#1b2029",
-    "surface": "rgba(255,255,255,0.06)",
-    "surface_border": "rgba(255,255,255,0.14)",
-    "ink": "#f4f6fa",
-    "ink_sub": "#9aa3b2",
-    "accent": "#ffb020",
-    "correct": "#2ecc71",
-    "wrong": "#e74c3c",
-    "practice_fill": "rgba(0,0,0,0.25)"
-  },
-  "color_jobs": {
-    "accent": "new / changed / emphasis",
-    "correct": "right form",
-    "wrong": "wrong form / common mistake",
-    "ink_sub": "secondary instruction only — never as body content"
+    "bg": {"hex": "#14171d", "provenance": "fact", "role": "页面底色"},
+    "bg_grad2": {"hex": "#1b2029", "provenance": "approx", "role": "渐变副色"},
+    "surface": {"hex": "rgba(255,255,255,0.06)", "provenance": "approx", "role": "卡片/容器底色"},
+    "surface_border": {"hex": "rgba(255,255,255,0.14)", "provenance": "approx", "role": "卡片边框"},
+    "ink": {"hex": "#f4f6fa", "provenance": "fact", "role": "正文主色"},
+    "ink_sub": {"hex": "#9aa3b2", "provenance": "fact", "role": "次要说明文字"},
+    "accent": {"hex": "#ffb020", "provenance": "fact", "role": "新知识点强调 / 高亮"},
+    "correct": {"hex": "#2ecc71", "provenance": "fact", "role": "正确形式 / 正向反馈"},
+    "wrong": {"hex": "#e74c3c", "provenance": "fact", "role": "错误形式 / 易错警示"},
+    "warning": {"hex": "#f39c12", "provenance": "approx", "role": "警告 / 需注意"},
+    "info": {"hex": "#3498db", "provenance": "approx", "role": "提示 / 补充信息"},
+    "highlight": {"hex": "#ffb020", "provenance": "fact", "role": "文本高亮（同 accent）"},
+    "muted": {"hex": "#6c7a89", "provenance": "approx", "role": "极次要 / 禁用态"},
+    "practice_fill": {"hex": "rgba(0,0,0,0.25)", "provenance": "approx", "role": "练习页底色"}
   },
   "typography": {
     "family": "'Microsoft YaHei','PingFang SC',sans-serif",

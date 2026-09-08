@@ -24,6 +24,7 @@ import urllib.request
 
 import imageio_ffmpeg
 import numpy as np
+from charts import resolve_chart
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,15 +44,27 @@ SAMPLE_RATE = 24000
 LAYOUT_FILES = {
     "title": "layout-title.html",
     "rule": "layout-rule.html",
+    "diagram": "layout-diagram.html",
     "example": "layout-example.html",
     "mistake": "layout-mistake.html",
     "practice": "layout-practice.html",
     "answer": "layout-answer.html",
     "summary": "layout-summary.html",
 }
+# 排版变体：kind → {variant_id → layout_file}
+LAYOUT_VARIANTS = {
+    "rule": {
+        "side": "layout-rule-side.html",
+        "formula": "layout-rule-formula.html",
+    },
+    "example": {
+        "side": "layout-example-side.html",
+    },
+}
 KIND_BADGE = {
     "title": "",
     "rule": "讲解",
+    "diagram": "图解",
     "example": "例句",
     "mistake": "易错",
     "practice": "练习",
@@ -61,6 +74,7 @@ KIND_BADGE = {
 ROLE_TO_KIND = {
     "learning_objective": "title",
     "concept_anchor": "rule",
+    "visual_anchor": "diagram",
     "worked_demo": "example",
     "common_mistake": "mistake",
     "understanding_check": "practice",
@@ -73,6 +87,7 @@ KIND_TO_ROLE = {v: k for k, v in ROLE_TO_KIND.items()}
 KIND_MOTION = {
     "title": "zoom_in",
     "rule": "focus",
+    "diagram": "focus",
     "example": "focus",
     "mistake": "pulse",
     "practice": "pulse",
@@ -149,6 +164,21 @@ VOICE_WHITELIST = (
 )
 
 
+def resolve_voice(sc, tpl):
+    """解析场景音色：scene.voice → voices[scene.voice] → tpl.voice → '茉莉'。
+    支持对话模式：顶层 voices={"narrator":"苏打","student":"冰糖"}，
+    每页 scene.voice 可写角色 ID（如 "narrator"）或直接写音色名（如 "苏打"）。"""
+    voices_map = tpl.get("voices", {})
+    default_voice = tpl.get("voice", "茉莉")
+    sc_voice = sc.get("voice")
+    if sc_voice:
+        # 先查 voices 映射（角色 ID → 音色名）
+        if sc_voice in voices_map:
+            return voices_map[sc_voice]
+        return sc_voice
+    return default_voice
+
+
 def load_style(style_name="teaching"):
     path = os.path.join(TEMPLATE_DIR, f"style-{style_name}.json")
     if not os.path.isfile(path):
@@ -157,19 +187,32 @@ def load_style(style_name="teaching"):
         return json.load(f)
 
 
+def _palette_hex(palette, key, default=""):
+    """从 palette 提取 hex 值，兼容字符串与对象格式。"""
+    val = palette.get(key, default)
+    if isinstance(val, dict):
+        return val.get("hex", default)
+    return val if isinstance(val, str) else default
+
+
 def style_token_map(style):
     p, t, e = style["palette"], style["typography"], style.get("exercise", {})
+    h = lambda k, d="": _palette_hex(p, k, d)
     return {
-        "__BG__": p["bg"],
-        "__BG2__": p["bg_grad2"],
-        "__SURFACE__": p["surface"],
-        "__SURFACE_BORDER__": p["surface_border"],
-        "__INK__": p["ink"],
-        "__INK_SUB__": p["ink_sub"],
-        "__ACCENT__": p["accent"],
-        "__CORRECT__": p["correct"],
-        "__WRONG__": p["wrong"],
-        "__PRACTICE_FILL__": p.get("practice_fill", "rgba(0,0,0,0.25)"),
+        "__BG__": h("bg"),
+        "__BG2__": h("bg_grad2"),
+        "__SURFACE__": h("surface"),
+        "__SURFACE_BORDER__": h("surface_border"),
+        "__INK__": h("ink"),
+        "__INK_SUB__": h("ink_sub"),
+        "__ACCENT__": h("accent"),
+        "__CORRECT__": h("correct"),
+        "__WRONG__": h("wrong"),
+        "__WARNING__": h("warning", h("accent")),
+        "__INFO__": h("info", h("accent")),
+        "__HIGHLIGHT__": h("highlight", h("accent")),
+        "__MUTED__": h("muted", h("ink_sub")),
+        "__PRACTICE_FILL__": h("practice_fill", "rgba(0,0,0,0.25)"),
         "__FONT__": t["family"],
         "__TITLE_SIZE__": str(t["title_size"]),
         "__BODY_SIZE__": str(t["body_size"]),
@@ -177,7 +220,7 @@ def style_token_map(style):
         "__BADGE_SIZE__": str(t["badge_size"]),
         "__EX_BORDER_STYLE__": e.get("border_style", "dashed"),
         "__EX_BORDER_WIDTH__": e.get("border_width", "3px"),
-        "__EX_BORDER_COLOR__": e.get("border_color", p["accent"]),
+        "__EX_BORDER_COLOR__": e.get("border_color", h("accent")),
     }
 
 
@@ -187,10 +230,19 @@ def inject_style(html, style):
     return html
 
 
-def load_layout(kind):
+def load_layout(kind, variant=None):
+    """加载 layout HTML。variant 非空时尝试加载变体，不存在则回退默认。"""
     fn = LAYOUT_FILES.get(kind)
     if not fn:
         raise ValueError(f"未知 kind: {kind}（可选: {', '.join(LAYOUT_FILES)}）")
+    # 尝试加载变体
+    if variant and kind in LAYOUT_VARIANTS:
+        vfn = LAYOUT_VARIANTS[kind].get(variant)
+        if vfn:
+            vpath = os.path.join(TEMPLATE_DIR, vfn)
+            if os.path.isfile(vpath):
+                with open(vpath, encoding="utf-8") as f:
+                    return f.read()
     path = os.path.join(TEMPLATE_DIR, fn)
     with open(path, encoding="utf-8") as f:
         return f.read()
@@ -207,20 +259,62 @@ def resolve_kind(sc):
 
 
 def resolve_motion(sc, motion_enabled=True):
+    """解析 motion 字段。返回 list[{type, delay}] 格式。
+    向后兼容：字符串 "focus" → [{"type": "focus", "delay": 0}]"""
     if not motion_enabled:
-        return "none"
+        return [{"type": "none", "delay": 0}]
     m = sc.get("motion")
     if m is None or m == "":
-        return KIND_MOTION.get(resolve_kind(sc), "none")
-    if m not in MOTIONS:
-        raise ValueError(f"未知 motion={m!r}（可选: {', '.join(MOTIONS)}）")
-    return m
+        default = KIND_MOTION.get(resolve_kind(sc), "none")
+        return [{"type": default, "delay": 0}]
+    # 字符串格式（向后兼容）
+    if isinstance(m, str):
+        if m not in MOTIONS:
+            raise ValueError(f"未知 motion={m!r}（可选: {', '.join(MOTIONS)}）")
+        return [{"type": m, "delay": 0}]
+    # 数组格式（动效序列化）
+    if isinstance(m, list):
+        effects = []
+        for item in m:
+            if isinstance(item, str):
+                if item not in MOTIONS:
+                    raise ValueError(
+                        f"未知 motion={item!r}（可选: {', '.join(MOTIONS)}）"
+                    )
+                effects.append({"type": item, "delay": 0})
+            elif isinstance(item, dict):
+                t = item.get("type", "none")
+                if t not in MOTIONS:
+                    raise ValueError(
+                        f"未知 motion type={t!r}（可选: {', '.join(MOTIONS)}）"
+                    )
+                effects.append({"type": t, "delay": float(item.get("delay", 0))})
+            else:
+                raise ValueError(f"motion 数组元素格式错误: {item!r}")
+        return effects if effects else [{"type": "none", "delay": 0}]
+    raise ValueError(f"motion 格式错误: {m!r}（应为字符串或数组）")
+
+
+def _motion_display_name(effects):
+    """用于日志显示的动效名称。"""
+    if len(effects) == 1:
+        return effects[0]["type"]
+    return "+".join(e["type"] for e in effects)
 
 
 def _escape(text):
     """把教学字段当纯文本：& < > \" ' 按字面显示；下划线转为实体以中和 __...__ 槽位 token，
-    避免内容被后续槽二次解释或被误判为残留占位符。"""
-    return html.escape(str(text), quote=True).replace("_", "&#95;")
+    避免内容被后续槽二次解释或被误判为残留占位符。
+    换行处理：JSON 中的 \\n、真实换行、手写 <br> 均统一转为 HTML <br>。"""
+    s = str(text)
+    # 1. 先统一换行：JSON 转义 \\n、真实换行、手写 <br> / <br/> / <br /> 均归一
+    s = s.replace("\\n", "\n")
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
+    # 2. 保护 <br>：先提取，再 escape，最后还原
+    s = s.replace("\n", "@@BR@@")
+    s = html.escape(s, quote=True).replace("_", "&#95;")
+    s = s.replace("@@BR@@", "<br>")
+    return s
 
 
 def highlight_body(body, kind):
@@ -255,9 +349,26 @@ def ease_out_cubic(t):
     return 1.0 - (1.0 - t) ** 3
 
 
-def motion_vars(motion, t):
-    """返回 (--m-scale, --m-hl, --m-glow)。t∈[0,1] 为段内进度。"""
+def motion_vars(effects, t):
+    """返回 (--m-scale, --m-hl, --m-glow)。effects 为 list[{type, delay}]，t∈[0,1]。
+    多动效叠加规则：scale 取最大值，hl 取最大值，glow 取最大值。"""
     t = max(0.0, min(1.0, float(t)))
+    max_scale, max_hl, max_glow = 1.0, 1.0, 0.0
+    for eff in effects:
+        etype = eff["type"]
+        delay = eff.get("delay", 0)
+        # 延迟映射：delay 秒数换算为段内进度比例（假设段长约3-5秒）
+        # 简化：delay 直接作为 t 的偏移
+        et = max(0.0, min(1.0, t - delay))
+        s, h, g = _single_motion_vars(etype, et)
+        max_scale = max(max_scale, s)
+        max_hl = max(max_hl, h)
+        max_glow = max(max_glow, g)
+    return max_scale, max_hl, max_glow
+
+
+def _single_motion_vars(motion, t):
+    """单动效计算。"""
     if motion == "none":
         return 1.0, 1.0, 0.0
     if motion == "zoom_in":
@@ -265,7 +376,6 @@ def motion_vars(motion, t):
     if motion == "zoom_out":
         return 1.06 - 0.06 * ease_out_cubic(t), 1.0, 0.0
     if motion == "focus":
-        # 整页轻推近 + 高亮词一次聚焦后保持微强调
         s = 1.0 + 0.028 * ease_out_cubic(min(t * 1.6, 1.0))
         if t < 0.45:
             pulse = math.sin((t / 0.45) * math.pi)
@@ -273,7 +383,6 @@ def motion_vars(motion, t):
             pulse = 0.22
         return s, 1.0 + 0.14 * pulse, 0.55 * pulse
     if motion == "pulse":
-        # 易错/练习：高亮词两下轻跳，提醒「看这里」
         pulse = 0.55 + 0.45 * math.sin(t * math.pi * 2.0)
         return 1.0 + 0.012 * pulse, 1.0 + 0.16 * pulse, 0.5 * pulse
     return 1.0, 1.0, 0.0
@@ -301,7 +410,8 @@ def apply_motion_css_vars(page, scale, hl, glow):
 def render_html(sc, W, H, style):
     """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。"""
     kind = resolve_kind(sc)
-    html = inject_style(load_layout(kind), style)
+    layout_variant = sc.get("layout_variant")
+    html = inject_style(load_layout(kind, layout_variant), style)
     if "</head>" in html:
         html = html.replace("</head>", MOTION_CSS + "</head>", 1)
     else:
@@ -318,6 +428,12 @@ def render_html(sc, W, H, style):
             html = html.replace('<div class="think">__THINK__</div>', "", 1)
         else:
             think_html = _escape(str(think))
+    chart_raw = sc.get("chart", "")
+    chart_html = (
+        resolve_chart(chart_raw, style)
+        if isinstance(chart_raw, dict)
+        else str(chart_raw)
+    )
     slots = {
         "__W__": str(W),
         "__H__": str(H),
@@ -326,6 +442,7 @@ def render_html(sc, W, H, style):
         "__SUB__": _escape(sc.get("sub", "")),
         "__ZH__": _escape(zh),
         "__BODY__": body_html,
+        "__CHART__": chart_html,
     }
     if think_html is not None:
         slots["__THINK__"] = think_html
@@ -358,8 +475,10 @@ def validate_layouts():
                 f"{fn}: HTML 属性 style 烘焙了视觉样式 {m.group(0)[:60]!r}——应走 style token"
             )
         need = ["__HEADER__"] if kind == "title" else ["__HEADER__", "__BODY__"]
-        if kind in ("rule", "example", "mistake", "practice", "answer"):
+        if kind in ("rule", "diagram", "example", "mistake", "practice", "answer"):
             need += ["__SUB__", "__BADGE__"]
+        if kind == "diagram":
+            need.append("__CHART__")
         if kind == "summary":
             need = ["__BODY__", "__SUB__"]
         if kind == "example":
@@ -377,10 +496,11 @@ def validate_layouts():
     return errors
 
 
-# 教学弧相位（docs/teaching-method.md）：title → rule+ → example+ → (mistake) → practice → answer → summary
+# 教学弧相位（docs/teaching-method.md）：title → rule+ → (diagram) → example+ → (mistake) → practice → answer → summary
 _ARC_PHASE = {
     "title": 0,
     "rule": 1,
+    "diagram": 1,  # 图解归属于概念锚点阶段
     "example": 2,
     "mistake": 3,
     "practice": 4,
@@ -397,6 +517,12 @@ def validate_storyboard(tpl):
         warnings.append(
             f"voice={voice!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
         )
+    voices_map = tpl.get("voices", {})
+    for role_id, vname in voices_map.items():
+        if vname not in VOICE_WHITELIST:
+            warnings.append(
+                f"voices.{role_id}={vname!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
+            )
     fps = tpl.get("fps", 30)
     if isinstance(fps, bool) or not isinstance(fps, int) or fps <= 0:
         errors.append(f"fps 须为正整数（当前 {fps!r}）；缺省 30")
@@ -428,10 +554,34 @@ def validate_storyboard(tpl):
         sub = (sc.get("sub") or "").strip()
         if sub and LEAK_RE.match(sub):
             errors.append(f"{prefix}: sub={sub!r} 像样式泄漏")
-        if "motion" in sc and sc["motion"] not in MOTIONS:
-            errors.append(
-                f"{prefix}: motion={sc['motion']!r} 非法（{', '.join(MOTIONS)}）"
+        # 检查每页 voice 字段（支持角色 ID 或直接音色名）
+        sc_voice = sc.get("voice")
+        if sc_voice and sc_voice not in voices_map and sc_voice not in VOICE_WHITELIST:
+            warnings.append(
+                f"{prefix}: voice={sc_voice!r} 不在 voices 映射或 TTS 白名单"
             )
+        if "motion" in sc:
+            mv = sc["motion"]
+            if isinstance(mv, str):
+                if mv not in MOTIONS:
+                    errors.append(
+                        f"{prefix}: motion={mv!r} 非法（{', '.join(MOTIONS)}）"
+                    )
+            elif isinstance(mv, list):
+                for idx, item in enumerate(mv):
+                    mt = (
+                        item
+                        if isinstance(item, str)
+                        else item.get("type", "")
+                        if isinstance(item, dict)
+                        else ""
+                    )
+                    if mt not in MOTIONS:
+                        errors.append(
+                            f"{prefix}: motion[{idx}] type={mt!r} 非法（{', '.join(MOTIONS)}）"
+                        )
+            else:
+                errors.append(f"{prefix}: motion 格式错误（应为字符串或数组）")
         if kind == "mistake":
             if "**" not in sc.get("body", ""):
                 errors.append(
@@ -505,11 +655,19 @@ def validate_storyboard(tpl):
 
 
 def validate_rendered_html(html, scene_index):
-    """占位符检查。溢出探测走 preview_overflow()，需 page 实测。"""
+    """占位符检查与未解释转义字符复核。溢出探测走 preview_overflow()，需 page 实测。"""
     errs = []
     left = PLACEHOLDER_RE.findall(html)
     if left:
         errs.append(f"scenes[{scene_index}] 渲染后仍残留占位符: {sorted(set(left))}")
+    # 检查是否存在未解释的字面 \\n / \t 等生硬转义字符暴露在正文中
+    if "\\n" in html or "\\t" in html:
+        errs.append(f"scenes[{scene_index}] 渲染后仍残留字面转义字符 (如 \\n 或 \\t)")
+    # 检查 <br> 是否被错误转义为 &lt;br&gt;（原样显示在画面上）
+    if "&lt;br&gt;" in html or "&lt;br /&gt;" in html:
+        errs.append(
+            f"scenes[{scene_index}] 渲染后 <br> 被错误转义为 &lt;br&gt;（应为 HTML 换行）"
+        )
     return errs
 
 
@@ -519,6 +677,7 @@ def validate_rendered_html(html, scene_index):
 _OVERFLOW_SELECTORS_BY_KIND = {
     "title": [".big", ".sub"],
     "rule": [".title", ".badge", ".sub", ".body", ".hl", ".err"],
+    "diagram": [".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err"],
     "example": [".title", ".badge", ".sub", ".en", ".zh", ".hl", ".err"],
     "mistake": [".title", ".badge", ".sub", ".q", ".why", ".hl", ".err"],
     "practice": [".title", ".badge", ".sub", ".q", ".think", ".err"],
@@ -566,9 +725,14 @@ def preview_overflow(page, W, H, kind=None):
     return out
 
 
-def _motion_probe_ts(motion):
+def _motion_probe_ts(effects):
     """预览闸门探测的动效进度采样点。none 只测静态；其余按 0..1 网格覆盖峰值。"""
-    if motion == "none":
+    # 向后兼容字符串格式
+    if isinstance(effects, str):
+        if effects == "none":
+            return [0.0]
+        return [i / 20.0 for i in range(21)]
+    if all(e["type"] == "none" for e in effects):
         return [0.0]
     return [i / 20.0 for i in range(21)]
 
@@ -832,7 +996,6 @@ def main():
     W = int(tpl.get("width", 1280))
     H = int(tpl.get("height", 720))
     fps_raw = tpl.get("fps", 30)
-    voice = tpl.get("voice", "茉莉")
     scenes = tpl["scenes"]
     motion_enabled = (not args.no_motion) and (tpl.get("motion", True) is not False)
 
@@ -892,9 +1055,10 @@ def main():
     cache_dir = os.path.join(ROOT, "_build", lesson_key)
     os.makedirs(cache_dir, exist_ok=True)
     for i, sc in enumerate(scenes):
-        raw_path, wav_path = _audio_paths(cache_dir, i, sc["narrate"], voice)
+        sc_voice = resolve_voice(sc, tpl)
+        raw_path, wav_path = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
         hold = float(sc.get("hold", 0.0))
-        if args.reuse_audio and _cache_hit(raw_path, voice, sc["narrate"]):
+        if args.reuse_audio and _cache_hit(raw_path, sc_voice, sc["narrate"]):
             raw_pcm, rate = read_wav_pcm(raw_path)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(f"{raw_path} 采样率 {rate} != {SAMPLE_RATE}")
@@ -902,7 +1066,7 @@ def main():
         else:
             if args.reuse_audio:
                 print(f"   cache miss scene {i}（旁白/音色变更或无缓存），重 TTS")
-            wav_bytes = mi_tts(sc["narrate"], voice)
+            wav_bytes = mi_tts(sc["narrate"], sc_voice)
             raw_pcm, rate, channels, sampwidth = decode_wav(wav_bytes)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(
@@ -917,7 +1081,7 @@ def main():
                     f"scene {i} TTS 位深 {sampwidth * 8}bit != 16bit（仅支持 16bit）"
                 )
             write_wav_pcm(raw_path, raw_pcm, SAMPLE_RATE)
-            _write_cache_meta(raw_path, voice, sc["narrate"], SAMPLE_RATE)
+            _write_cache_meta(raw_path, sc_voice, sc["narrate"], SAMPLE_RATE)
             src = "tts"
         pcm, n_frames, dur, narr_frames = prepare_scene_audio(raw_pcm, hold, FPS)
         write_wav_pcm(wav_path, pcm, SAMPLE_RATE)
@@ -926,7 +1090,7 @@ def main():
         frame_counts.append(n_frames)
         narr_frames_list.append(narr_frames)
         print(
-            f"   scene {i} [{resolve_kind(sc)}/{resolve_motion(sc, motion_enabled)}]: "
+            f"   scene {i} [{resolve_kind(sc)}/{_motion_display_name(resolve_motion(sc, motion_enabled))}]: "
             f"{dur:.2f}s ({n_frames}f, hold={hold:.1f}, {src})"
         )
     expected_dur = sum(durs)
@@ -1009,7 +1173,8 @@ def main():
             page.set_content(html)
             motion = resolve_motion(sc, motion_enabled)
             n_frames = frame_counts[i]
-            if motion == "none" or n_frames == 1:
+            is_static = all(e["type"] == "none" for e in motion) or n_frames == 1
+            if is_static:
                 apply_motion_css_vars(page, *motion_vars(motion, 0.0))
                 shot = page.screenshot(type="png")
                 for _ in range(n_frames):
@@ -1049,7 +1214,7 @@ def main():
 
 def _audio_fingerprint(narrate, voice):
     """8 字符内容指纹。voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
-    return hashlib.sha1(f"{voice}|{narrate}".encode()).hexdigest()[:8]
+    return hashlib.sha256(f"{voice}|{narrate}".encode()).hexdigest()[:8]
 
 
 def _audio_paths(cache_dir, i, narrate, voice):
@@ -1158,7 +1323,9 @@ def run_preview(
                 }
             )
             tag = "OK" if not ph_errs and not findings else "FAIL"
-            print(f"   scene {i} [{kind}/{motion}]: {tag}  → {png}")
+            print(
+                f"   scene {i} [{kind}/{_motion_display_name(motion)}]: {tag}  → {png}"
+            )
         b.close()
     report_path = os.path.join(out_dir, "overflow.json")
     with open(report_path, "w", encoding="utf-8") as f:

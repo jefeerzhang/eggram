@@ -20,6 +20,7 @@ from make_video import (  # noqa: E402
     _audio_paths,
     _cache_hit,
     _ffprobe_duration,
+    resolve_voice,
 )
 
 
@@ -55,12 +56,12 @@ def main():
     # prepare_scene_audio 产物、ceil 垫帧已含），不用 raw+hold+TAIL_PAD 重建口径
     with open(args.storyboard, encoding="utf-8") as f:
         tpl = json.load(f)
-    voice = tpl.get("voice", "茉莉")
     slug = os.path.splitext(os.path.basename(args.storyboard))[0]
     cache_dir = os.path.join(ROOT, "_build", slug)
     expected = 0.0
     for i, sc in enumerate(tpl["scenes"]):
-        _, wav_path = _audio_paths(cache_dir, i, sc["narrate"], voice)
+        sc_voice = resolve_voice(sc, tpl)
+        _, wav_path = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
         if not os.path.isfile(wav_path):
             fail(4, f"missing scene audio: {wav_path}")
         expected += wav_duration(wav_path)
@@ -77,9 +78,20 @@ def main():
     # 旁白改过会残留旧指纹文件，计数口径误报；meta 不符时 render 会重 TTS（假阳性）
     if args.expect_reuse_audio:
         for i, sc in enumerate(tpl["scenes"]):
-            raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], voice)
-            if not _cache_hit(raw_path, voice, sc["narrate"]):
+            sc_voice = resolve_voice(sc, tpl)
+            raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
+            if not _cache_hit(raw_path, sc_voice, sc["narrate"]):
                 fail(5, f"cache miss scene {i}: {raw_path}（旁白/音色与缓存不符）")
+
+    # 检查 6：文本与视觉生硬未转义字符拦截（例如未渲染的字面 \\n / \\t）
+    for i, sc in enumerate(tpl["scenes"]):
+        for field in ("header", "sub", "body", "zh", "think"):
+            val = str(sc.get(field, ""))
+            if "\\n" in val or "\\t" in val:
+                fail(
+                    6,
+                    f"scene {i} 字段 '{field}' 残留字面未解析转义字符 (如 \\\\n 或 \\\\t)",
+                )
 
     print("VERIFY_OK [✓✓✓✓✓]")
     print(

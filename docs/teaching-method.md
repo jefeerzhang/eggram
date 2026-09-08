@@ -26,6 +26,27 @@
 必选：`title → rule+ → example+ → practice → answer → summary`  
 推荐：`practice` 前加 `mistake`。
 
+## 对话模式（双音色）
+
+支持男女生对话式教学，通过 `voices` 映射 + 每页 `voice` 覆盖实现：
+
+```json
+{
+  "voice": "苏打",
+  "voices": {"narrator": "苏打", "student": "冰糖"},
+  "scenes": [
+    {"kind": "rule", "narrate": "边际效用就是...", "voice": "narrator"},
+    {"kind": "practice", "narrate": "老师，为什么第二杯半价呢？", "voice": "student", "hold": 3.0},
+    {"kind": "answer", "narrate": "好问题！正因为边际效用递减...", "voice": "narrator"}
+  ]
+}
+```
+
+- `voices`：角色 ID → 音色名映射（顶层定义）
+- 每页 `voice`：可写角色 ID（如 `"narrator"`）或直接写音色名（如 `"苏打"`）
+- 省略 `voice` → 使用顶层 `voice` 默认值
+- 音频缓存按 `voice|narrate` 指纹隔离，换音色自动重 TTS
+
 ## 颜色工作（只在 style）
 
 | token | 工作 |

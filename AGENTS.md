@@ -4,10 +4,17 @@
 
 教学微课仓库（从英语语法起步，已扩展到任意适合讲练穿插的知识点）。Agent 入口：根目录 [`SKILL.md`](SKILL.md)（*micro-video*）。
 
+## 核心流程三阶段
+
+```text
+主题输入 → [阶段 0: 脚本大纲与用户确认(硬阻断)] → [阶段 1: 写分镜与过闸门] → [阶段 2: 渲视频与验收]
+```
+
 ## Context pointers
 
 | Leading | 何时打开 |
 | --- | --- |
+| *脚本硬阻断* / 用户确认 | [`SKILL.md`](SKILL.md) 阶段 0 |
 | *分镜* / 教学微课流程 | [`SKILL.md`](SKILL.md) |
 | *page-role* / 教学弧 | [`docs/teaching-method.md`](docs/teaching-method.md) |
 | 分镜字段 / `**` 高亮 | [`docs/json-schema.md`](docs/json-schema.md) |

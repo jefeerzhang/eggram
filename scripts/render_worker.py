@@ -145,14 +145,15 @@ def main():
         cmd.append("--expect-reuse-audio")
     rc, log4 = run_script(cmd)
     if rc != 0:
-        marks = ["✓"] * 5
+        marks = ["✓"] * 6
         item = 0
         for line in log4.splitlines():
             if line.startswith("verify FAIL ["):
                 item = int(line[13])
-                marks[item - 1] = "✗"
+                if 1 <= item <= len(marks):
+                    marks[item - 1] = "✗"
         if not item:  # worker_verify 崩溃等未预期失败，标后三项存疑
-            marks[2:] = ["✗"] * 3
+            marks[2:] = ["✗"] * (len(marks) - 2)
         emit(
             "FAIL_AT_VERIFY",
             verify="[" + "".join(marks) + "]",
@@ -169,7 +170,7 @@ def main():
             pick(log4, "VERIFY_OK"),
         ]
     )
-    emit("OK", artifact=out, verify="[✓✓✓✓✓]", steps=steps)
+    emit("OK", artifact=out, verify="[✓✓✓✓✓✓]", steps=steps)
 
 
 if __name__ == "__main__":
