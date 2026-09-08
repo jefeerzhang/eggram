@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 
 import imageio_ffmpeg
@@ -643,6 +644,9 @@ def write_wav_pcm(path, pcm, rate=SAMPLE_RATE):
     pcm = np.asarray(pcm, dtype=np.int16)
     # 先写临时文件再 os.replace 原子落位：并行 worker（同 slug 换皮批）对同一
     # 确定性内容的并发读写不再产生撕裂（读方要么旧文件要么新文件，都是完整的）。
+    # Windows 反例（#18 复测坐实）：目标被其它进程 ffmpeg 持句柄时 replace 抛
+    # WinError 5。同指纹路径的并发写内容完全确定 → 尺寸一致即视为已落位；
+    # 否则短退避重试，仍失败才抛（真异常）。
     tmp = f"{path}.tmp{os.getpid()}"
     try:
         with wave.open(tmp, "wb") as w:
@@ -650,7 +654,18 @@ def write_wav_pcm(path, pcm, rate=SAMPLE_RATE):
             w.setsampwidth(2)
             w.setframerate(rate)
             w.writeframes(pcm.tobytes())
-        os.replace(tmp, path)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                try:
+                    if os.path.getsize(path) == os.path.getsize(tmp):
+                        return  # 并发同内容写入，目标已完整，读方无损
+                except OSError:
+                    pass
+                time.sleep(0.3)
+        raise RuntimeError(f"wav 原子替换失败（目标被长期占用）: {path}")
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
