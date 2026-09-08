@@ -5,7 +5,8 @@
 
 5 步固定流水线：preflight → preview → render → verify → 回传。
 退出码：0=OK 1=PREFLIGHT 2=PREVIEW 3=RENDER 4=VERIFY（含用法错误=1）。
-stdout 末段为固定四字段回传：status / artifact / verify / diagnostic。
+stdout 末段为固定四字段回传：status / artifact / verify / diagnostic；
+OK 路径另加一行 `steps:`（#19：各步执行痕迹，字段只增不改，失败路径行为不变）。
 并行换皮（#18）：preview 目录按解析后的 style 隔离为 `_build/preview/<slug>__<style>/`，同 slug 多 worker 不再互踩。
 """
 
@@ -38,10 +39,19 @@ def tail(text, n):
     return "\n".join(text.strip().splitlines()[-n:])
 
 
-def emit(status, artifact=None, verify=None, diagnostic=None):
+def pick(log, key):
+    for line in log.splitlines():
+        if key in line:
+            return line.strip()
+    return "?"
+
+
+def emit(status, artifact=None, verify=None, diagnostic=None, steps=None):
     print(f"status: {status}")
     print(f"artifact: {artifact or '(none)'}")
     print(f"verify: {verify or '(none)'}")
+    if steps:  # #19：仅 OK 路径输出，既有解析方不受影响
+        print(f"steps: {steps}")
     if diagnostic:
         print(f"diagnostic:\n{diagnostic}")
 
@@ -81,12 +91,12 @@ def main():
     out = args.output or f"output/{slug}.mp4"
 
     # Step 1 preflight（含浏览器时点检查；exit 3 语义已在其中处理）
-    rc, log = run_script(
+    rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
         + (["--browser", args.browser] if args.browser else [])
     )
     if rc != 0:
-        emit("FAIL_AT_PREFLIGHT", diagnostic=tail(log, 50))
+        emit("FAIL_AT_PREFLIGHT", diagnostic=tail(log1, 50))
         sys.exit(1)
 
     # Step 2 preview：独立跑只为错误分类（全渲内部本有预览闸门）。
@@ -98,9 +108,9 @@ def main():
         style_key = args.style or json.load(f).get("style") or "teaching"
     style_key = re.sub(r"[^\w.-]", "_", str(style_key))
     prev_dir = os.path.join("_build", "preview", f"{slug}__{style_key}")
-    rc, log = run_script(["scripts/worker_preview.py", sb, "--preview-dir", prev_dir])
+    rc, log2 = run_script(["scripts/worker_preview.py", sb, "--preview-dir", prev_dir])
     if rc != 0:
-        emit("FAIL_AT_PREVIEW", diagnostic=f"[worker exit {rc}]\n{tail(log, 50)}")
+        emit("FAIL_AT_PREVIEW", diagnostic=f"[worker exit {rc}]\n{tail(log2, 50)}")
         sys.exit(2)
 
     # Step 3 render：只调 CLI，不改其行为
@@ -113,11 +123,11 @@ def main():
         cmd.append("--no-motion")
     if args.browser:
         cmd += ["--browser", args.browser]
-    rc, log = run_script(cmd)
+    rc, log3 = run_script(cmd)
     if rc == 3:  # 映射表：make_video exit 3（浏览器缺失）任何阶段归 PREFLIGHT
         emit(
             "FAIL_AT_PREFLIGHT",
-            diagnostic=f"render 中 make_video exit 3（浏览器缺失）\n{tail(log, 100)}",
+            diagnostic=f"render 中 make_video exit 3（浏览器缺失）\n{tail(log3, 100)}",
         )
         sys.exit(1)
     if rc != 0:
@@ -125,7 +135,7 @@ def main():
         emit(
             "FAIL_AT_RENDER",
             artifact=art,
-            diagnostic=f"make_video.py exit {rc}\n{tail(log, 100)}",
+            diagnostic=f"make_video.py exit {rc}\n{tail(log3, 100)}",
         )
         sys.exit(3)
 
@@ -133,11 +143,11 @@ def main():
     cmd = ["scripts/worker_verify.py", sb, out]
     if args.reuse_audio:
         cmd.append("--expect-reuse-audio")
-    rc, log = run_script(cmd)
+    rc, log4 = run_script(cmd)
     if rc != 0:
         marks = ["✓"] * 5
         item = 0
-        for line in log.splitlines():
+        for line in log4.splitlines():
             if line.startswith("verify FAIL ["):
                 item = int(line[13])
                 marks[item - 1] = "✗"
@@ -146,12 +156,20 @@ def main():
         emit(
             "FAIL_AT_VERIFY",
             verify="[" + "".join(marks) + "]",
-            diagnostic=tail(log, 50),
+            diagnostic=tail(log4, 50),
         )
         sys.exit(4)
 
-    # Step 5 回传
-    emit("OK", artifact=out, verify="[✓✓✓✓✓]")
+    # Step 5 回传（steps 行给出各步执行痕迹，防"OK 但没真跑"质疑）
+    steps = " | ".join(
+        [
+            pick(log1, "PREFLIGHT_OK"),
+            pick(log2, "PREVIEW_OK"),
+            pick(log3, "DONE"),
+            pick(log4, "VERIFY_OK"),
+        ]
+    )
+    emit("OK", artifact=out, verify="[✓✓✓✓✓]", steps=steps)
 
 
 if __name__ == "__main__":

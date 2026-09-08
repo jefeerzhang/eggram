@@ -27,9 +27,7 @@ def main():
         prog="worker_preview.py", description="render worker Step 2 预览闸门"
     )
     ap.add_argument("storyboard", help="分镜 JSON 路径")
-    ap.add_argument(
-        "output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4"
-    )
+    ap.add_argument("output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4")
     ap.add_argument("--preview-dir", default=None, help="自定义预览截图目录")
     args = ap.parse_args()
 
