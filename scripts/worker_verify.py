@@ -85,7 +85,7 @@ def main():
 
     # 检查 6：文本与视觉生硬未转义字符拦截（例如未渲染的字面 \\n / \\t）
     for i, sc in enumerate(tpl["scenes"]):
-        for field in ("header", "sub", "body", "zh", "think"):
+        for field in ("header", "sub", "body", "wrong_body", "zh", "think"):
             val = str(sc.get(field, ""))
             if "\\n" in val or "\\t" in val:
                 fail(

@@ -349,17 +349,20 @@ def ease_out_cubic(t):
     return 1.0 - (1.0 - t) ** 3
 
 
-def motion_vars(effects, t):
-    """返回 (--m-scale, --m-hl, --m-glow)。effects 为 list[{type, delay}]，t∈[0,1]。
+def motion_vars(effects, elapsed_seconds, duration_seconds=1.0):
+    """返回 (--m-scale, --m-hl, --m-glow)，时间和 delay 均以秒计。
+    延迟后在剩余旁白时间内完成动效，旁白结束后冻结；默认段长 1 秒。
     多动效叠加规则：scale 取最大值，hl 取最大值，glow 取最大值。"""
-    t = max(0.0, min(1.0, float(t)))
+    duration_seconds = max(0.0, float(duration_seconds))
+    elapsed_seconds = max(0.0, min(duration_seconds, float(elapsed_seconds)))
     max_scale, max_hl, max_glow = 1.0, 1.0, 0.0
     for eff in effects:
         etype = eff["type"]
         delay = eff.get("delay", 0)
-        # 延迟映射：delay 秒数换算为段内进度比例（假设段长约3-5秒）
-        # 简化：delay 直接作为 t 的偏移
-        et = max(0.0, min(1.0, t - delay))
+        if delay > 0 and (elapsed_seconds < delay or delay >= duration_seconds):
+            continue
+        remaining = duration_seconds - delay
+        et = (elapsed_seconds - delay) / remaining if remaining > 0 else 0.0
         s, h, g = _single_motion_vars(etype, et)
         max_scale = max(max_scale, s)
         max_hl = max(max_hl, h)
@@ -407,7 +410,7 @@ def apply_motion_css_vars(page, scale, hl, glow):
     )
 
 
-def render_html(sc, W, H, style):
+def render_html(sc, W, H, style, motion_enabled=True):
     """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。"""
     kind = resolve_kind(sc)
     layout_variant = sc.get("layout_variant")
@@ -442,7 +445,14 @@ def render_html(sc, W, H, style):
         "__SUB__": _escape(sc.get("sub", "")),
         "__ZH__": _escape(zh),
         "__BODY__": body_html,
+        "__WRONG_BODY__": highlight_body(sc.get("wrong_body", ""), "mistake"),
         "__CHART__": chart_html,
+        "__CHART_MOTION__": (
+            "chart-animated"
+            if kind == "diagram"
+            and any(e["type"] != "none" for e in resolve_motion(sc, motion_enabled))
+            else "chart-static"
+        ),
     }
     if think_html is not None:
         slots["__THINK__"] = think_html
@@ -554,6 +564,14 @@ def validate_storyboard(tpl):
         sub = (sc.get("sub") or "").strip()
         if sub and LEAK_RE.match(sub):
             errors.append(f"{prefix}: sub={sub!r} 像样式泄漏")
+        if kind == "example" and sc.get("layout_variant") == "side":
+            wrong_body = sc.get("wrong_body")
+            if not isinstance(wrong_body, str) or not wrong_body.strip():
+                errors.append(
+                    f"{prefix}: example side 须提供非空字符串 wrong_body（错误示例）"
+                )
+            elif LEAK_RE.match(wrong_body.strip()):
+                errors.append(f"{prefix}: wrong_body={wrong_body!r} 像样式泄漏")
         # 检查每页 voice 字段（支持角色 ID 或直接音色名）
         sc_voice = sc.get("voice")
         if sc_voice and sc_voice not in voices_map and sc_voice not in VOICE_WHITELIST:
@@ -676,9 +694,12 @@ def validate_rendered_html(html, scene_index):
 # 正文叫 .q（不是 .body）；中文槽按 layout 不同叫 .zh/.why/.think/.explain。
 _OVERFLOW_SELECTORS_BY_KIND = {
     "title": [".big", ".sub"],
-    "rule": [".title", ".badge", ".sub", ".body", ".hl", ".err"],
+    "rule": [
+        ".title", ".badge", ".sub", ".body", ".formula", ".step-text",
+        ".example-text", ".hl", ".err",
+    ],
     "diagram": [".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err"],
-    "example": [".title", ".badge", ".sub", ".en", ".zh", ".hl", ".err"],
+    "example": [".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".err"],
     "mistake": [".title", ".badge", ".sub", ".q", ".why", ".hl", ".err"],
     "practice": [".title", ".badge", ".sub", ".q", ".think", ".err"],
     "answer": [".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".err"],
@@ -1007,7 +1028,7 @@ def main():
     for i, sc in enumerate(scenes):
         try:
             resolve_motion(sc, motion_enabled)
-            html = render_html(sc, W, H, style)
+            html = render_html(sc, W, H, style, motion_enabled=motion_enabled)
             errors.extend(validate_rendered_html(html, i))
         except Exception as e:
             errors.append(f"scenes[{i}] 试渲染失败: {e}")
@@ -1164,7 +1185,9 @@ def main():
         b = p.chromium.launch(executable_path=browser, headless=True)
         page = b.new_page(viewport={"width": W, "height": H})
         for i, sc in enumerate(scenes):
-            html = render_html(sc, W, H, style)
+            html = render_html(
+                sc, W, H, style, motion_enabled=motion_enabled and frame_counts[i] > 1
+            )
             left = validate_rendered_html(html, i)
             if left:
                 proc.kill()
@@ -1290,7 +1313,7 @@ def run_preview(
         b = p.chromium.launch(executable_path=browser, headless=True)
         page = b.new_page(viewport={"width": W, "height": H})
         for i, sc in enumerate(scenes):
-            html = render_html(sc, W, H, style)
+            html = render_html(sc, W, H, style, motion_enabled=motion_enabled)
             ph_errs = validate_rendered_html(html, i)
             if ph_errs:
                 gate_errs.extend(ph_errs)

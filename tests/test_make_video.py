@@ -10,6 +10,7 @@ import shutil
 import struct
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -198,6 +199,24 @@ def test_frame_progress_freezes_after_narration():
     assert mv._frame_progress(1, 1) == 1.0
 
 
+def test_delayed_zoom_starts_after_two_seconds_and_finishes_with_narration():
+    effects = mv.resolve_motion({"kind": "rule", "motion": [{"type": "zoom_in", "delay": 2}]})
+    assert mv.motion_vars(effects, 1.5, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert mv.motion_vars(effects, 4, duration_seconds=6) == pytest.approx((1.048125, 1.0, 0.0))
+    assert mv.motion_vars(effects, 6, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
+    assert mv.motion_vars(effects, 9, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
+
+
+@pytest.mark.parametrize("motion", ["pulse", "zoom_out"])
+def test_delayed_motion_has_no_effect_before_start_or_beyond_narration(motion):
+    effects = [{"type": motion, "delay": 2}]
+    assert mv.motion_vars(effects, 0, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert mv.motion_vars(effects, 1.9, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert mv.motion_vars(effects, 2, duration_seconds=6)[0] > 1
+    assert mv.motion_vars(effects, 9, duration_seconds=1) == (1.0, 1.0, 0.0)
+    assert mv.motion_vars(effects, 9, duration_seconds=0) == (1.0, 1.0, 0.0)
+
+
 def test_prepare_scene_audio_reports_narration_frames():
     raw = np.zeros(24000, dtype=np.int16)  # 1s @ 24k
     pcm, n_frames, dur, narr = mv.prepare_scene_audio(raw, 3.0, 30)
@@ -370,6 +389,25 @@ def test_sample_passes_think_and_escape():
     assert not errors
 
 
+@pytest.mark.parametrize("wrong_body", [None, "", "   ", 123])
+def test_side_example_requires_wrong_body(wrong_body):
+    tpl = load_sample()
+    sc = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
+    sc["layout_variant"] = "side"
+    if wrong_body is not None:
+        sc["wrong_body"] = wrong_body
+    errors, _ = mv.validate_storyboard(tpl)
+    assert any("wrong_body" in error for error in errors)
+
+
+def test_side_example_accepts_independent_wrong_body():
+    tpl = load_sample()
+    sc = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
+    sc.update(layout_variant="side", wrong_body="He **reading**.")
+    errors, _ = mv.validate_storyboard(tpl)
+    assert errors == []
+
+
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
 
 
@@ -446,3 +484,122 @@ def test_browser_overflow_reports_top_bound(browser):
     findings = mv.preview_overflow(page, 1280, 720, kind="rule")
     assert any(sel == ".title" for sel, _ in findings)
     page.close()
+
+
+def test_browser_side_example_has_distinct_escaped_columns(browser):
+    sc = {
+        "kind": "example",
+        "layout_variant": "side",
+        "header": "Compare",
+        "body": "He **is reading**.",
+        "wrong_body": "He **reading**.<br><input>",
+        "narrate": "Compare the sentences.",
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+        assert mv.validate_rendered_html(html, 0) == []
+        page.set_content(html)
+        assert page.locator(".col-correct .col-text").inner_text() == "He is reading."
+        assert (
+            page.locator(".col-wrong .col-text").inner_text() == "He reading.\n<input>"
+        )
+        assert page.locator(".col-correct .hl").inner_text() == "is reading"
+        assert page.locator(".col-wrong .err").inner_text() == "reading"
+        assert page.locator("input").count() == 0
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(
+    "chart",
+    [
+        {"preset": "timeline", "events": [{"year": "2020", "label": "Start"}]},
+        {"preset": "quadrant", "labels": [{"label": "A", "desc": "Detail"}]},
+        {"preset": "curve", "highlights": [{"x": 1, "y": 50, "label": "A"}]},
+    ],
+)
+@pytest.mark.parametrize(
+    "motion_enabled,scene_motion",
+    [
+        (False, "focus"),
+        (True, "none"),
+        (True, [{"type": "none", "delay": 0}]),
+    ],
+)
+def test_browser_static_diagram_first_frame_is_complete(
+    browser, chart, motion_enabled, scene_motion
+):
+    sc = {
+        "kind": "diagram",
+        "header": "Diagram",
+        "body": "B",
+        "chart": chart,
+        "motion": scene_motion,
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(
+            mv.render_html(sc, 1280, 720, mv.load_style("teaching"), motion_enabled)
+        )
+        page.screenshot(type="png")
+        states = page.locator(".stagger-item,.glow-point").evaluate_all(
+            "els => els.map(el => [getComputedStyle(el).opacity, getComputedStyle(el).transform])"
+        )
+        assert states and all(state == ["1", "none"] for state in states)
+        assert page.evaluate("document.getAnimations().length") == 0
+        offsets = page.locator(".draw-path").evaluate_all(
+            "els => els.map(el => parseFloat(getComputedStyle(el).strokeDashoffset))"
+        )
+        assert all(offset == 0 for offset in offsets)
+    finally:
+        page.close()
+
+
+def test_browser_animated_diagram_still_has_animations(browser):
+    sc = {
+        "kind": "diagram",
+        "header": "Diagram",
+        "body": "B",
+        "chart": {"preset": "timeline", "events": [{"year": "2020", "label": "Start"}]},
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+        assert page.evaluate("document.getAnimations().length") > 0
+    finally:
+        page.close()
+
+
+def test_preview_rejects_clipped_formula():
+    sc = {
+        "kind": "rule", "layout_variant": "formula", "header": "Formula",
+        "body": "<br>".join(["A = B + C"] * 24), "narrate": "Formula",
+    }
+    # run_preview owns its Playwright loop; keep it separate from the browser fixture.
+    with tempfile.TemporaryDirectory(prefix="mv_formula_overflow_") as preview_dir, ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(
+            mv.run_preview, "formula.json", [sc], mv.load_style("teaching"), 1280, 720,
+            False, mv.find_browser(), preview_dir=preview_dir,
+        ).result()
+    assert result == 1
+
+
+@pytest.mark.parametrize("kind,variant,field", [
+    ("rule", "formula", "zh"),
+    ("rule", "side", "zh"),
+    ("example", "side", "body"),
+    ("example", "side", "wrong_body"),
+])
+def test_preview_rejects_clipped_variant_content(kind, variant, field):
+    sc = {
+        "kind": kind, "layout_variant": variant, "header": "Compare",
+        "body": "A", "wrong_body": "B", "zh": "Detail", "narrate": "Compare",
+        field: "<br>".join(["A = B + C"] * 24),
+    }
+    with tempfile.TemporaryDirectory(prefix="mv_variant_overflow_") as preview_dir, ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(
+            mv.run_preview, "variant.json", [sc], mv.load_style("teaching"), 1280, 720,
+            False, mv.find_browser(), preview_dir=preview_dir,
+        ).result()
+    assert result == 1

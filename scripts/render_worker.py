@@ -108,21 +108,22 @@ def main():
         style_key = args.style or json.load(f).get("style") or "teaching"
     style_key = re.sub(r"[^\w.-]", "_", str(style_key))
     prev_dir = os.path.join("_build", "preview", f"{slug}__{style_key}")
-    rc, log2 = run_script(["scripts/worker_preview.py", sb, "--preview-dir", prev_dir])
+    render_options = ["--preview-dir", prev_dir]
+    if args.style:
+        render_options += ["--style", args.style]
+    if args.no_motion:
+        render_options.append("--no-motion")
+    if args.browser:
+        render_options += ["--browser", args.browser]
+    rc, log2 = run_script(["scripts/worker_preview.py", sb] + render_options)
     if rc != 0:
         emit("FAIL_AT_PREVIEW", diagnostic=f"[worker exit {rc}]\n{tail(log2, 50)}")
         sys.exit(2)
 
     # Step 3 render：只调 CLI，不改其行为
-    cmd = ["scripts/make_video.py", sb, out, "--preview-dir", prev_dir]
+    cmd = ["scripts/make_video.py", sb, out] + render_options
     if args.reuse_audio:
         cmd.append("--reuse-audio")
-    if args.style:
-        cmd += ["--style", args.style]
-    if args.no_motion:
-        cmd.append("--no-motion")
-    if args.browser:
-        cmd += ["--browser", args.browser]
     rc, log3 = run_script(cmd)
     if rc == 3:  # 映射表：make_video exit 3（浏览器缺失）任何阶段归 PREFLIGHT
         emit(

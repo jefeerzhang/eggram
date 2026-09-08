@@ -27,6 +27,7 @@
 | header | ✅ | 「学习者此刻做什么」 |
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
 | body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`** |
+| wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
 | hold | practice | ≥3.0（样例 3.0） |
@@ -59,6 +60,12 @@
 | example | `"side"` | layout-example-side.html | 左正确右易错对比 |
 
 省略 `layout_variant` → 使用默认 layout。变体文件不存在时自动回退默认。
+
+`example` 的 `side` 变体：左栏使用 `body`（正确示例），右栏使用独立的 `wrong_body`（错误示例），不自动生成或复用正确句子。例如：
+
+```json
+{"kind": "example", "layout_variant": "side", "header": "比较句子", "body": "He **is reading**.", "wrong_body": "He **reading**.", "narrate": "现在进行时不能漏掉 be 动词。"}
+```
 
 ## chart 对象（diagram 页面专用）
 

@@ -1,6 +1,7 @@
 """worker_preview.py — render worker Step 2 预览闸门（GitHub issues #12/#18）
 
 用法: py scripts/worker_preview.py examples/<slug>.json [output_path] [--preview-dir DIR]
+      [--style NAME] [--no-motion] [--browser PATH]
 
 跑 make_video.py --preview，再核对截图齐全 + 溢出报告干净。
 全过 → stdout `PREVIEW_OK <n> frames`、exit 0；任一失败 → 诊断、exit 2（FAIL_AT_PREVIEW）。
@@ -31,6 +32,9 @@ def main():
         "output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4"
     )
     ap.add_argument("--preview-dir", default=None, help="自定义预览截图目录")
+    ap.add_argument("--style", default=None)
+    ap.add_argument("--no-motion", action="store_true")
+    ap.add_argument("--browser", default=None)
     args = ap.parse_args()
 
     storyboard = args.storyboard
@@ -45,6 +49,12 @@ def main():
     cmd = [sys.executable, MAKE_VIDEO, storyboard, output, "--preview"]
     if args.preview_dir:
         cmd += ["--preview-dir", args.preview_dir]
+    if args.style:
+        cmd += ["--style", args.style]
+    if args.no_motion:
+        cmd.append("--no-motion")
+    if args.browser:
+        cmd += ["--browser", args.browser]
     r = subprocess.run(cmd, check=False, capture_output=True, text=True)
     combined = r.stdout + r.stderr
     if r.returncode != 0:
