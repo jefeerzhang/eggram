@@ -4,12 +4,15 @@
 
 四项检查全过 → stdout 打印 PREFLIGHT_OK、exit 0；任一失败 → stderr 文案、exit 1。
 失败分类（FAIL_AT_PREFLIGHT）由 worker wrapper（issue 01）负责，本脚本只短路径失败。
+入口处先 load_env()：TTS key 检查只看 os.environ，必须在它之前把 ROOT/.env 读进来。
 """
 
 import argparse
 import os
 import subprocess
 import sys
+
+from storyboard_gate import load_env
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VALIDATOR = os.path.join(ROOT, "scripts", "validate_storyboard.py")
@@ -49,7 +52,7 @@ def main():
 
     # 3. TTS key：只查环境变量，不试连 API（避免误判）
     if not os.environ.get("MIMO_API_KEY"):
-        fail("no TTS key: 未配置 MIMO_API_KEY 环境变量")
+        fail("no TTS key: 未配置 MIMO_API_KEY（环境变量或 ROOT/.env）")
 
     # 4. 浏览器可发现（时点检查：假设 preflight→render 期间路径不变；
     #    真失效时 make_video exit 3 仍按映射表归 FAIL_AT_PREFLIGHT）
@@ -75,4 +78,5 @@ def main():
 
 
 if __name__ == "__main__":
+    load_env()
     main()

@@ -367,6 +367,24 @@ def test_worker_missing_browser_maps_to_preflight():
     assert "指定浏览器不存在" in r.stdout
 
 
+def test_preflight_reads_tts_key_from_dotenv():
+    """ROOT/.env 的 MIMO_API_KEY 必须在 key 检查前进入 environ，
+    否则干净 shell 里 worker 必然 FAIL_AT_PREFLIGHT。"""
+    pytest.importorskip("dotenv")  # 缺包时 load_env 静默 no-op，本用例前提不成立
+    with tempfile.TemporaryDirectory(prefix="mv_env_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Env key narration.", 0.0)
+        (project / ".env").write_text("MIMO_API_KEY=from-dotenv\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "MIMO_API_KEY"}
+        env["PYTHONUTF8"] = "1"
+        r = subprocess.run(
+            [sys.executable, "scripts/worker_preflight.py", "cases/a/lesson.json"],
+            cwd=project, env=env, capture_output=True, text=True,
+            encoding="utf-8", timeout=120,
+        )
+        assert "no TTS key" not in r.stderr, r.stderr
+
+
 def test_worker_preview_failure_runs_zero_tts_requests():
     browser = find_browser()
     if not browser:
