@@ -439,6 +439,7 @@ def main():
                 "frames": n_frames,
                 "narr_frames": narr_frames,
                 "hold": hold,
+                "cache": src,  # 本次实际执行事实：tts=新配音 / reuse=命中复用（#24）
             }
         )
         print(
@@ -561,7 +562,11 @@ def main():
         )
     elif actual_dur is not None:
         print(f"   OK: {actual_dur:.2f}s ≈ {expected_dur:.2f}s")
-    # 本次运行产物清单（#22）：verify 用它拿「本次实际音轨集合」，精确重定位
+    # 本次运行产物清单（#22）：verify 用它拿「本次实际音轨集合」，精确重定位；
+    # 缓存使用事实来自本次执行（循环内命中/未命中），不做事后文件计数（#24）
+    tts_generated = sum(1 for m in scene_meta if m["cache"] == "tts")
+    tts_reused = sum(1 for m in scene_meta if m["cache"] == "reuse")
+    print(f"   TTS 本次生成 {tts_generated} / 复用 {tts_reused}")
     ra.write_manifest(
         rdir,
         {
@@ -576,6 +581,9 @@ def main():
             "storyboard": os.path.abspath(tpl_path),
             "mp4": os.path.abspath(out),
             "expected_duration": expected_dur,
+            "tts_generated": tts_generated,
+            "tts_reused": tts_reused,
+            "reuse_mode": "reuse" if args.reuse_audio else "regenerate",
             "scenes": scene_meta,
         },
     )

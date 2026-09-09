@@ -56,7 +56,7 @@ def wav_duration(path):
 
 
 def resolve_audio_sources(storyboard, tpl, style_name, motion_enabled):
-    """返回 (音轨路径列表, 来源说明)。run manifest 优先，旧版共享音轨回退。"""
+    """返回 (音轨路径列表, 来源说明, manifest)。run manifest 优先，旧版共享音轨回退。"""
     slug = os.path.splitext(os.path.basename(storyboard))[0]
     rkey = ra.run_key(storyboard, style_name, motion_enabled)
     rdir = ra.run_dir(ROOT, slug, style_name, rkey)
@@ -64,14 +64,24 @@ def resolve_audio_sources(storyboard, tpl, style_name, motion_enabled):
     if manifest and manifest.get("schema") == ra.MANIFEST_SCHEMA:
         wavs = [sc["wav"] for sc in manifest.get("scenes", [])]
         if wavs:
-            return wavs, f"run:{rdir}"
+            return wavs, f"run:{rdir}", manifest
     cache_dir = os.path.join(ROOT, "_build", slug)
     wavs = []
     for i, sc in enumerate(tpl["scenes"]):
         sc_voice = resolve_voice(sc, tpl)
         _, wav_path = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
         wavs.append(wav_path)
-    return wavs, f"legacy:{cache_dir}"
+    return wavs, f"legacy:{cache_dir}", None
+
+
+def _cache_facts(manifest):
+    """本次生成/复用事实（make_video 执行时记录进 manifest）；旧产物无此字段。"""
+    if not manifest or "tts_generated" not in manifest:
+        return ""
+    return (
+        f"(本次生成 {manifest.get('tts_generated', '?')} / "
+        f"复用 {manifest.get('tts_reused', '?')}, mode={manifest.get('reuse_mode', '?')})"
+    )
 
 
 def main():
@@ -105,7 +115,7 @@ def main():
         tpl = json.load(f)
     motion_enabled = (not args.no_motion) and (tpl.get("motion", True) is not False)
     style_name = args.style or tpl.get("style", "teaching")
-    wavs, src = resolve_audio_sources(args.storyboard, tpl, style_name, motion_enabled)
+    wavs, src, manifest = resolve_audio_sources(args.storyboard, tpl, style_name, motion_enabled)
     expected = 0.0
     for w in wavs:
         if not os.path.isfile(w):
@@ -136,9 +146,10 @@ def main():
             raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
             if not _cache_hit(raw_path, sc_voice, sc["narrate"]):
                 fail(5, f"cache miss scene {i}: {raw_path}（旁白/音色与缓存不符）")
-        _record(5, wr.PASS, "reuse-confirmed")
+        _record(5, wr.PASS, ("reuse-confirmed " + _cache_facts(manifest)).rstrip())
     else:
-        _record(5, wr.SKIP, "未要求 --expect-reuse-audio（显式跳过）")
+        skip = "未要求 --expect-reuse-audio（显式跳过） " + _cache_facts(manifest)
+        _record(5, wr.SKIP, skip.rstrip())
 
     # 检查 6：文本与视觉生硬未转义字符拦截（例如未渲染的字面 \\n / \\t）
     for i, sc in enumerate(tpl["scenes"]):

@@ -6,8 +6,10 @@
 5 步固定流水线：preflight → preview → render → verify → 回传；前序失败即短路，
 后续阶段不执行。退出码映射见 scripts/worker_result.py（0=OK 1=PREFLIGHT
 2=PREVIEW 3=RENDER 4=VERIFY，含用法错误=1）。
-stdout 末段为固定四字段回传：status / artifact / verify / diagnostic；
-OK 路径另加一行 `steps:`（#19：各步执行痕迹）。
+stdout 末段为固定回传：status / artifact / verify / cache / diagnostic；
+OK 路径另加一行 `steps:`（#19：各步执行痕迹）。`cache:`（#24）报告本次 TTS
+生成/复用事实（generated/reused/mode，取自本次 run 的 manifest），渲染完成前
+为 `(none)`——通过验收不等于零 TTS，事实以执行记录为准。
 verify 勾选串六格图例：✓ 通过、✗ 失败、- 显式跳过、· 因前序失败/未执行；
 由 worker_verify 的 `CHECK <n> <STATE>` 协议行（空白分词）与本 worker 自己实测的
 Step 1/2 结果合成（#25），不解析日志字符位置，未检查项绝不填通过。
@@ -61,10 +63,11 @@ def pick(log, key):
     return "?"
 
 
-def emit(status, artifact=None, verify=None, diagnostic=None, steps=None):
+def emit(status, artifact=None, verify=None, diagnostic=None, steps=None, cache=None):
     print(f"status: {status}")
     print(f"artifact: {artifact or '(none)'}")
     print(f"verify: {verify or '(none)'}")
+    print(f"cache: {cache or '(none)'}")  # #24：本次 TTS 生成/复用事实，渲染完成前无
     if steps:  # #19：仅 OK 路径输出，既有解析方不受影响
         print(f"steps: {steps}")
     if diagnostic:
@@ -125,12 +128,34 @@ def main():
         sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
 
     try:
-        _pipeline(args, sb, out)
+        _pipeline(args, sb, out, style_name)
     finally:
         lock.release()
 
 
-def _pipeline(args, sb, out):
+def _cache_facts(sb, style_name, no_motion):
+    """本次 TTS 生成/复用事实（#24）：读本次 run 的 manifest（make_video 执行时
+    记录），不做事后数文件；旧产物/渲染未完成 → None。"""
+    try:
+        with open(sb, encoding="utf-8") as f:
+            motion_enabled = (not no_motion) and (json.load(f).get("motion", True) is not False)
+    except (OSError, ValueError):
+        return None
+    slug = os.path.splitext(os.path.basename(sb))[0]
+    rkey = ra.run_key(sb, style_name, motion_enabled)
+    manifest = ra.read_manifest(ra.run_dir(ROOT, slug, style_name, rkey))
+    if not manifest or manifest.get("schema") != ra.MANIFEST_SCHEMA:
+        return None
+    if "tts_generated" not in manifest:
+        return None
+    return (
+        f"generated={manifest.get('tts_generated', '?')} "
+        f"reused={manifest.get('tts_reused', '?')} "
+        f"mode={manifest.get('reuse_mode', '?')}"
+    )
+
+
+def _pipeline(args, sb, out, style_name):
     # Step 1 preflight（含浏览器时点检查；exit 3 语义已在其中处理）
     rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
@@ -188,11 +213,14 @@ def _pipeline(args, sb, out):
         cmd.append("--expect-reuse-audio")
     rc, log4 = run_script(cmd)
     marks = wr.marks_line((wr.PASS, wr.PASS), wr.parse_check_lines(log4))
+    # #24：渲染完成后才有本次 run 的 manifest，事实只在成功路径后读取
+    cache = _cache_facts(sb, style_name, args.no_motion)
     if rc != 0:
         emit(
             "FAIL_AT_VERIFY",
             verify=f"[{marks}]",
             diagnostic=tail(log4, 50),
+            cache=cache,
         )
         sys.exit(wr.STAGE_EXITS["VERIFY"])
 
@@ -205,7 +233,7 @@ def _pipeline(args, sb, out):
             pick(log4, "VERIFY_OK"),
         ]
     )
-    emit("OK", artifact=out, verify=f"[{marks}]", steps=steps)
+    emit("OK", artifact=out, verify=f"[{marks}]", steps=steps, cache=cache)
 
 
 if __name__ == "__main__":

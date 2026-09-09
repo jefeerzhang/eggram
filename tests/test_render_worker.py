@@ -385,6 +385,7 @@ def test_worker_preview_failure_runs_zero_tts_requests():
         assert r.returncode == 2
         assert "status: FAIL_AT_PREVIEW" in r.stdout
         assert "verify: (none)" in r.stdout
+        assert "cache: (none)" in r.stdout  # 渲染未完成，无本次事实
         assert counter["post"] == 0  # 预览失败零 TTS 请求
 
 
@@ -456,6 +457,45 @@ def test_worker_success_and_standalone_verify_marks_are_honest(tts_url):
         assert v2.returncode == 0, v2.stdout + v2.stderr
         assert "VERIFY_OK [··✓✓✓✓]" in v2.stdout
         assert "reuse-confirmed" in v2.stdout
+
+
+# ---- #24 回传真实复用与 TTS 生成情况：事实取自本次 run manifest ----
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_reports_cache_facts_across_runs(tts_url):
+    """冷缓存全生成、热缓存零 TTS、单段旁白改动只重配一段、--no-reuse-audio
+    全量重跑 mode=regenerate 且检查 5 显式跳过不假通过。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_cache_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Cache facts.", 0.0)
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        with local_tts() as (url, counter):
+            env["MIMO_API_URL"] = url
+            r1 = _run_worker(project, env, "cases/a/lesson.json", "out/a.mp4", "--reuse-audio")
+            assert r1.returncode == 0, r1.stdout + r1.stderr
+            assert "cache: generated=6 reused=0 mode=reuse" in r1.stdout, r1.stdout
+            assert counter["post"] == 6, counter
+            r2 = _run_worker(project, env, "cases/a/lesson.json", "out/a2.mp4", "--reuse-audio")
+            assert r2.returncode == 0, r2.stdout + r2.stderr
+            assert "cache: generated=0 reused=6 mode=reuse" in r2.stdout, r2.stdout
+            assert counter["post"] == 6, counter  # 热缓存零 TTS 请求
+            sb = project / "cases/a/lesson.json"
+            tpl = json.loads(sb.read_text(encoding="utf-8"))
+            tpl["scenes"][2]["narrate"] = "Changed narration only."
+            sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+            r3 = _run_worker(project, env, "cases/a/lesson.json", "out/a3.mp4", "--reuse-audio")
+            assert r3.returncode == 0, r3.stdout + r3.stderr
+            assert "cache: generated=1 reused=5 mode=reuse" in r3.stdout, r3.stdout
+            assert counter["post"] == 7, counter  # 只重配改动的一段
+            r4 = _run_worker(project, env, "cases/a/lesson.json", "out/a4.mp4", "--no-reuse-audio")
+            assert r4.returncode == 0, r4.stdout + r4.stderr
+            assert "cache: generated=6 reused=0 mode=regenerate" in r4.stdout, r4.stdout
+            assert "verify: [✓✓✓✓-✓]" in r4.stdout  # 5 显式跳过，不填通过
+            assert counter["post"] == 13, counter
 
 
 # ---- #23 并行换皮自动独立成片 + 目标占用保护 ----

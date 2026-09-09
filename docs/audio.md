@@ -38,7 +38,8 @@
 
 - `preview/`：本次预览截图 + `overflow.json`
 - `audio/`：本次**加工音轨** `s{i}_{fp}.wav`（随 hold/fps 变化，不属于共享缓存）
-- `manifest.json`：本次产物清单（音轨集合、时长、fps、mp4 路径）
+- `manifest.json`：本次产物清单（音轨集合、时长、fps、mp4 路径，及本次 TTS
+  执行事实 `tts_generated`/`tts_reused`/`reuse_mode`）
 
 分工：**raw 可共享**（`_build/<slug>/`，旁白+音色指纹，换皮复用），**加工音轨归
 本次 run**——同 slug 不同来源、同旁白不同 hold/fps 的并行运行各写各的 run 目录，
@@ -48,6 +49,18 @@
 本次实际音轨集合独立测量（±5% 双向容差）；manifest 缺失时回退旧版共享音轨
 `_build/<slug>/s{i}_{fp}.wav`（兼容迁移前产物）。正常/失败退出都不清理任何
 run 目录或历史产物。
+
+## 缓存使用事实（#24）
+
+「本次生成了几段、复用了几段」以 make_video 执行时记录为准（audio 循环里的
+实际 `tts`/`reuse` 决定），写进 run manifest 并汇总到顶层
+`tts_generated` / `tts_reused` / `reuse_mode`（`reuse` | `regenerate`）：
+
+- worker 回传新增 `cache:` 字段（如 `cache: generated=1 reused=5 mode=reuse`），
+  渲染完成前为 `(none)`
+- verify 检查 5 的明细附带同一事实——**通过检查 5 ≠ 本次零 TTS**：命中判定按
+  指纹逐段核对，旁白改动的那段会如实记为重新生成
+- 不做事后数文件：缓存目录里旧指纹文件残留不影响统计
 
 ## Done when
 
