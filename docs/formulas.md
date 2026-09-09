@@ -53,7 +53,8 @@ Storyboard JSON 的 `body` / `sub` / `header` 字段怎么写这些。
 ```
 
 **兼容：** 无 `formula` 时行为与现网一致——仍要求非空 `body`，主式来自 `body`，分项走旧 `zh`/badge 双步。  
-**并存警告：** 同时提供 `formula` 与非空 `body` 时，*闸门* 发出 warning「以 formula 为准，body 忽略」，画面只读 `formula`。
+**并存警告：** 同时提供 `formula` 与非空 `body` 时，*闸门* 发出 warning「以 formula 为准，body 忽略」，画面只读 `formula`。  
+**顺带：** `parts` 不只是排版槽位——它同时决定公式页的逐项点亮顺序，见 [motion.md](motion.md#公式页分步动效)。
 
 ## 避坑
 
