@@ -78,6 +78,11 @@ def test_escape_sub_sup_whitelist_and_literal_guards():
     assert sg._escape("@BR@ literal") == "@BR@ literal"
     assert "<br>" not in sg._escape("@BR@ literal")
     assert sg._escape("a\x00b") == "ab"
+    # 白名单内混排：嵌套 <br> 与含换行的下标都要成立
+    assert sg._escape("<sub>a<br>b</sub>") == "<sub>a<br>b</sub>"
+    assert sg._escape("<sub>a\nb</sub>") == "<sub>a<br>b</sub>"
+    # 正文里已写成转义形态的，不被二次还原成标签
+    assert sg._escape("&lt;sub&gt;x&lt;/sub&gt;") == "&amp;lt;sub&amp;gt;x&amp;lt;/sub&amp;gt;"
     # highlight 路径同样保留下标
     out = mv.highlight_body("夏普：**R<sub>p</sub>**", "rule")
     assert "R<sub>p</sub>" in out
