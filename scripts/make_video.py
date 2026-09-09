@@ -28,13 +28,7 @@ import urllib.request
 
 import run_artifacts as ra  # noqa: E402  单次渲染产物归属（run_key/manifest）
 from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker 消费 mv.*
-    KIND_BADGE,
-    KIND_MOTION,
-    KIND_TO_ROLE,
     LAYOUT_FILES,
-    LAYOUT_VARIANTS,
-    MOTIONS,
-    ROLE_TO_KIND,
     _motion_display_name,
     _motion_probe_states,
     apply_motion_css_vars,
@@ -43,14 +37,12 @@ from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker
     formula_parts_for_motion,
     highlight_body,
     load_env,
-    load_layout,
     load_style,
     motion_vars,
     prepare_storyboard,
     preview_overflow,
     render_html,
     resolve_kind,
-    resolve_layout_file,
     resolve_motion,
     resolve_voice,
     validate_layouts,
@@ -104,17 +96,6 @@ def mi_tts(text, voice):
 FADE_SEC = 0.012  # 仅抑咔哒；淡化落在段首/段尾静音区，不吞字
 TAIL_PAD_SEC = 0.45  # 每段旁白后再垫一点静音，避免片尾/接缝被播放器吃掉
 SPEECH_FLOOR = 180.0  # |sample| 低于此视为静音（int16 幅度）
-
-
-def pcm_to_wav(pcm_bytes, path):
-    import wave
-
-    arr = np.frombuffer(pcm_bytes, dtype=np.int16)
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(SAMPLE_RATE)
-        w.writeframes(arr.tobytes())
 
 
 def read_wav_pcm(path):

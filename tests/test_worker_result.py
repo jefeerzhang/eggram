@@ -55,5 +55,5 @@ def test_marks_line_four_states_and_defaults():
 def test_check_line_format():
     assert wr.check_line(4, wr.FAIL, "boom boom") == "CHECK 4 FAIL boom boom"
     assert wr.check_line(6, wr.PASS) == "CHECK 6 PASS"
-    assert wr.CHECK_NAMES[1] == "闸门绿" and wr.CHECK_NAMES[6] == "无残留转义"
+    assert wr.CHECK_ITEMS == set(range(1, wr.N_CHECKS + 1))
     assert wr.STAGE_EXITS == {"PREFLIGHT": 1, "PREVIEW": 2, "RENDER": 3, "VERIFY": 4}

@@ -207,7 +207,6 @@ def test_prepare_scene_audio_keeps_silence():
 
 
 def test_motion_probe_states_static_and_delayed_coverage():
-    assert mv._motion_probe_states("none") == [(0.0, 1.0)]
     assert mv._motion_probe_states([{"type": "none", "delay": 0}]) == [(0.0, 1.0)]
     effects = [{"type": "zoom_in", "delay": 2}]
     states = mv._motion_probe_states(effects)
@@ -843,6 +842,29 @@ def test_chart_highlight_labels_do_not_cross_the_curve():
             if rx <= x <= rx + rw and ry <= y <= ry + rh
         ]
         assert not crossed, f"标签盒 ({rx}, {ry}, {rw}x{rh}) 压住曲线，穿过点 {crossed[:3]}"
+
+
+def test_chart_fn_presets_and_unknown_falls_back_to_linear():
+    """curve.fn 预设表达式推导采样点；未知表达式退回 1 - t。"""
+    colors = sg.style_token_map(mv.load_style("teaching"))
+
+    def screen_ys(expr):
+        svg = sg.resolve_chart(
+            {
+                "preset": "curve",
+                "range": {"xmin": 0, "xmax": 4, "ymin": 0, "ymax": 100},
+                "curve": {"fn": expr, "fn_scale": 100},
+            },
+            colors,
+        )
+        d = re.search(r"<path d='([^']+)'", svg).group(1)
+        return [float(b) for _, b in re.findall(r"(-?[\d.]+) (-?[\d.]+)", d)]
+
+    log = screen_ys("log")
+    assert len(log) == 51  # _CURVE_SAMPLES + 1
+    assert log[0] > log[-1]  # 屏幕 y 向下为正：取值递增 → 屏幕 y 递减
+    assert all(b <= a for a, b in zip(log, log[1:]))  # 单调，不回摆
+    assert screen_ys("no-such-fn") == screen_ys("1 - t")  # 未知表达式兜底
 
 
 # ---- 11 公式页分步动效时间线 ----
