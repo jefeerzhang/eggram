@@ -344,6 +344,7 @@ def main():
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
     motion_enabled = (not args.no_motion) and (tpl.get("motion", True) is not False)
+    blocks_on = blocks_enabled(tpl)  # #27：顶层 "blocks": false 可整支关闭
 
     print("0/4 校验布局与分镜...")
     prep = prepare_storyboard(tpl, style_name=args.style, motion_enabled=motion_enabled)
@@ -392,7 +393,7 @@ def main():
     # 历史成功结果与另一 run 的产物一律不沿用。直接渲染（无 token）总是自行预览。
     stamp = {
         "schema": ra.PREVIEW_STAMP_SCHEMA,
-        "digest": preview_stamp_digest(tpl_path, prep, motion_enabled),
+        "digest": preview_stamp_digest(tpl_path, prep, motion_enabled, tpl),
         "token": args.preview_token or "",
         "storyboard": os.path.abspath(tpl_path),
         "style": prep["style_name"],
@@ -404,7 +405,8 @@ def main():
         preview_rc = 0
     else:
         preview_rc = run_preview(
-            tpl_path, scenes, style, W, H, motion_enabled, browser, preview_out
+            tpl_path, scenes, style, W, H, motion_enabled, browser, preview_out,
+            tpl=tpl, blocks_on=blocks_on,
         )
         if preview_rc == 0:
             ra.write_preview_stamp(preview_out, stamp)
@@ -477,6 +479,7 @@ def main():
                 "narr_frames": narr_frames,
                 "hold": hold,
                 "cache": src,  # 本次实际执行事实：tts=新配音 / reuse=命中复用（#24）
+                "block": None,  # 帧循环里用 block 时改写为 block 名（#27）
             }
         )
         print(
@@ -554,6 +557,24 @@ def main():
         b = p.chromium.launch(executable_path=browser, headless=True)
         page = b.new_page(viewport={"width": W, "height": H})
         for i, sc in enumerate(scenes):
+            kind = resolve_kind(sc)
+            block = block_for_kind(kind) if (blocks_on and tpl) else None
+            bhtml = block_html(kind, sc, tpl, W, H) if block else None
+            if bhtml and init_block_page(page, bhtml, block[1]):
+                # block 页：timeline 按秒驱动（k/fps），跑完一遍后 hold 末态
+                # 到旁白结束（v1 契约，block 时长与旁白不对齐，#27 out-of-scope）
+                for k in range(frame_counts[i]):
+                    block_seek(page, block[1], min(k / FPS, block[2]))
+                    ff_stdin.write(page.screenshot(type="png"))
+                    gi += 1
+                scene_meta[i]["block"] = _block_name(block)
+                print(f"   scene {i} block:{_block_name(block)} {frame_counts[i]}f")
+                continue
+            if block:
+                print(
+                    f"   WARN: scene {i} block {_block_name(block)} 初始化失败，回退静态布局",
+                    file=sys.stderr,
+                )
             html = render_html(
                 sc, W, H, style, motion_enabled=motion_enabled and frame_counts[i] > 1
             )
@@ -692,9 +713,111 @@ def _file_sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def preview_stamp_digest(tpl_path, prep, motion_enabled):
+# ---- 动画 block（#27）：page-role → hyperframes block 整页换肤，唯一接缝 ----
+# 来源 heygen-com/hyperframes（Apache-2.0，署名行随 block 模板渲染）。block 页
+# 自带 GSAP timeline（window.__timelines，paused），逐帧按秒驱动；初始化失败
+# （CDN 不可达/JS 报错/WebGL 缺失）回退该页原静态布局，单页失败不阻断整支视频。
+
+BLOCKS_DIR = os.path.join(TEMPLATE_DIR, "blocks")
+
+# kind → (block 文件名, timeline key, block 时长秒)；不在表内的 kind 走原静态布局
+BLOCK_BY_KIND = {
+    "title": ("beat-freeze-cut.html", "beat-freeze-cut", 6.0),
+    "rule": ("cinematic-zoom.html", "main", 4.0),
+    "mistake": ("bar-chart-race.html", "bar-chart-race", 12.0),
+}
+
+
+def _block_name(entry):
+    """block 显示名（去扩展名），进日志与 manifest。"""
+    return entry[0][: -len(".html")]
+
+
+def blocks_enabled(tpl):
+    return tpl.get("blocks", True) is not False
+
+
+def block_for_kind(kind):
+    return BLOCK_BY_KIND.get(kind)
+
+
+def _strip_md(text):
+    return re.sub(r"\*\*(.+?)\*\*", r"\1", str(text))
+
+
+def block_config(kind, sc, tpl):
+    """page 数据 → block CONFIG（set_content 前经 window.__BLOCK_CONFIG 注入）。"""
+    if kind == "title":
+        return {
+            "primaryLabel": sc.get("header") or tpl.get("title", "微课"),
+            "secondaryLabel": sc.get("sub", ""),
+        }
+    if kind == "rule":
+        body = _strip_md(sc.get("body", "")).strip().replace("\n", "<br/>")
+        return {
+            "sceneFrom": "RULE",
+            "sceneTo": _strip_md(sc.get("sub", "")) or tpl.get("title", ""),
+            "ruleTitle": sc.get("header") or "核心规则",
+            "ruleBody": body,
+        }
+    if kind == "mistake":
+        # mistake-data 结构化字段是 schema 扩展（#27 out-of-scope #1）；v1 用
+        # block 内置样例数据，仅标题/副标题跟分镜走
+        cfg = {}
+        if sc.get("header"):
+            cfg["title"] = sc["header"]
+        if sc.get("sub"):
+            cfg["subtitle"] = sc["sub"]
+        return cfg
+    return {}
+
+
+def block_html(kind, sc, tpl, W, H):
+    """block 模板整页 HTML（含 CONFIG 注入）；kind 无 block 或模板缺失 → None。
+
+    block 原生 1920x1080；成片视口不同（分镜显式 width/height）时整体等比
+    缩放到视口，保持同帧尺寸进 ffmpeg pipe（image2pipe 要求统一帧大小）。"""
+    entry = BLOCK_BY_KIND.get(kind)
+    if not entry:
+        return None
+    path = os.path.join(BLOCKS_DIR, entry[0])
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        html = f.read()
+    cfg = json.dumps(block_config(kind, sc, tpl), ensure_ascii=False)
+    inject = "<script>window.__BLOCK_CONFIG=" + cfg + ";</script>"
+    scale = min(W / 1920.0, H / 1080.0)
+    if abs(scale - 1.0) > 1e-6:
+        inject += (
+            f"<style>html{{overflow:hidden}}body{{transform:scale({scale:.6f});"
+            "transform-origin:0 0;width:1920px;height:1080px;}}</style>"
+        )
+    return html.replace("<head>", "<head>" + inject, 1)
+
+
+def init_block_page(page, html, key, timeout=10000):
+    """装载 block 页并等 GSAP timeline 就绪；False = 初始化失败（调用方回退）。"""
+    try:
+        page.set_content(html, wait_until="load", timeout=timeout)
+        page.wait_for_function(
+            "(k) => !!(window.__timelines && window.__timelines[k])",
+            arg=key,
+            timeout=timeout,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def block_seek(page, key, seconds):
+    page.evaluate("([k, s]) => { window.__timelines[k].time(s); }", [key, seconds])
+
+
+def preview_stamp_digest(tpl_path, prep, motion_enabled, tpl=None):
     """预览有效性指纹（#26）：分镜字节 + style 文件字节 + 本次实际 layout 文件
-    字节 + motion 开关 + 预览逻辑版本。任一变化 → 指纹变 → 旧预览不沿用。"""
+    字节 + motion 开关 + 预览逻辑版本 + 本次用到的 block 模板字节（#27）。
+    任一变化 → 指纹变 → 旧预览不沿用。"""
     h = hashlib.sha256()
     h.update(f"preview-stamp v{PREVIEW_STAMP_VERSION}\0".encode("utf-8"))
     with open(tpl_path, "rb") as f:
@@ -705,6 +828,16 @@ def preview_stamp_digest(tpl_path, prep, motion_enabled):
     for lf in sorted({s["layout_file"] for s in prep["scenes"]}):
         h.update(b"\0layout\0")
         h.update(_file_sha(os.path.join(TEMPLATE_DIR, lf)).encode("ascii"))
+    if tpl is not None and blocks_enabled(tpl):
+        for bf in sorted(
+            {
+                BLOCK_BY_KIND[s["kind"]][0]
+                for s in prep["scenes"]
+                if s["kind"] in BLOCK_BY_KIND
+            }
+        ):
+            h.update(b"\0block\0")
+            h.update(_file_sha(os.path.join(BLOCKS_DIR, bf)).encode("ascii"))
     h.update(b"\0motion\0" + (b"on" if motion_enabled else b"off"))
     return h.hexdigest()
 
@@ -731,10 +864,15 @@ def preview_reusable(preview_dir, stamp, n_scenes):
     return not any(e.get("findings") or e.get("placeholder_errs") for e in report)
 
 
-def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir):
+def run_preview(
+    tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir,
+    tpl=None, blocks_on=False,
+):
     """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。
 
     preview_dir 由调用方给定（缺省为 run 目录的 preview/，#22 产物归属）。
+    block 页（#27）整页换肤：只截 t=0 一帧，不做溢出探测（block 自带布局；
+    探测选择器是静态布局专属），初始化失败回退静态路径。
     """
     out_dir = (
         preview_dir if os.path.isabs(preview_dir) else os.path.join(ROOT, preview_dir)
@@ -747,16 +885,40 @@ def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_
         b = p.chromium.launch(executable_path=browser, headless=True)
         page = b.new_page(viewport={"width": W, "height": H})
         for i, sc in enumerate(scenes):
+            kind = resolve_kind(sc)
+            motion = resolve_motion(sc, motion_enabled)
+            png = os.path.join(out_dir, f"s{i}.png")
+            block = block_for_kind(kind) if (blocks_on and tpl) else None
+            if block:
+                bhtml = block_html(kind, sc, tpl, W, H)
+                if bhtml and init_block_page(page, bhtml, block[1]):
+                    block_seek(page, block[1], 0.0)
+                    # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
+                    ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
+                    report.append(
+                        {
+                            "i": i,
+                            "kind": kind,
+                            "motion": motion,
+                            "png": png,
+                            "findings": [],
+                            "placeholder_errs": [],
+                            "block": _block_name(block),
+                        }
+                    )
+                    print(f"   scene {i} [{kind}/block:{_block_name(block)}]: OK  → {png}")
+                    continue
+                print(
+                    f"   WARN: scene {i} block {_block_name(block)} 初始化失败，回退静态布局",
+                    file=sys.stderr,
+                )
             html = render_html(sc, W, H, style, motion_enabled=motion_enabled)
             ph_errs = validate_rendered_html(html, i)
             if ph_errs:
                 gate_errs.extend(ph_errs)
             page.set_content(html)
-            kind = resolve_kind(sc)
-            motion = resolve_motion(sc, motion_enabled)
             # 缩略图取 t=0（起点画面），避免截到中间态
             apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
-            png = os.path.join(out_dir, f"s{i}.png")
             # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
             ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
             # 溢出探测覆盖动效可达状态：none 只测静态；其余按各动效自身窗口采样 0..1
@@ -778,6 +940,7 @@ def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_
                     "png": png,
                     "findings": [{"sel": sel, "msg": msg} for sel, msg in findings],
                     "placeholder_errs": ph_errs,
+                    "block": None,
                 }
             )
             tag = "OK" if not ph_errs and not findings else "FAIL"

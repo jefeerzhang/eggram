@@ -1,0 +1,360 @@
+<!doctype html>
+<!--
+  Title page block: beat-driven intro with freeze-frame hit.
+  Source: https://github.com/heygen-com/hyperframes (Apache-2.0)
+  Adapted for micro-course `title` page-role.
+
+  Page-role fit
+  ─────────────
+  - title 出现时刻 → 整段 intro push-in（0.00–0.70s）
+  - 关键概念首字 → freeze hit（freezeAt ≈ 2.2s，可改 CONFIG.freezeTime）
+  - 副标题 / 节拍 → ON THE BEAT 短标签
+
+  CONFIG（搜 "EDIT ME" 改这几行）
+  ───────────────────────────────
+  - primaryLabel  : freeze 时正中显示的字（建议 = 知识点核心词）
+  - secondaryLabel: intro 时顶部小标签（建议 = "现在进行时" / "be 动词"）
+  - beat1         : 第一个节奏点（0.7s 较安全）
+  - beat2 / freezeTime: 第二个节奏点 + freeze 触发（≈2.2s）
+  - intensity     : 0.6–1.4，越大越猛
+
+  1920x1080 6s。GSAP 3.14+（CDN）。
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Beat Freeze Cut</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=block"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        margin: 0;
+        overflow: hidden;
+        background: #0b0d10;
+      }
+
+      #bfc-root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        --bg-color: #0b0d10;
+        --accent-color: #00e5c7;
+        --bfc-ink: #f4f6f8;
+        --bfc-muted: #a0a8b0;
+        --bfc-panel: #14181f;
+        --bfc-panel-2: #1a2029;
+        --bfc-line: rgba(255, 255, 255, 0.08);
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        color: var(--bfc-ink);
+      }
+
+      #bfc-bg {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0, 229, 199, 0.07) 0%, transparent 55%),
+          radial-gradient(ellipse 50% 40% at 80% 80%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
+          var(--bg-color);
+      }
+
+      #bfc-grid {
+        position: absolute;
+        inset: 0;
+        opacity: 0.22;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+        background-size: 80px 80px;
+        mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 75%);
+        pointer-events: none;
+      }
+
+      #bfc-stage {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 48%;
+        will-change: transform, filter;
+      }
+
+      #bfc-shot-a,
+      #bfc-shot-b {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+
+      #bfc-shot-b {
+        visibility: hidden;
+        opacity: 0;
+      }
+
+      #bfc-a-crop {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform-origin: 50% 50%;
+      }
+
+      #bfc-a-card {
+        position: relative;
+        width: 680px;
+        height: 720px;
+        border-radius: 36px;
+        background:
+          linear-gradient(160deg, rgba(255, 255, 255, 0.06) 0%, transparent 40%),
+          linear-gradient(180deg, var(--bfc-panel-2) 0%, var(--bfc-panel) 100%);
+        border: 1px solid var(--bfc-line);
+        box-shadow:
+          0 40px 120px rgba(0, 0, 0, 0.55),
+          0 0 0 1px rgba(0, 229, 199, 0.08),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        overflow: hidden;
+        transform-origin: 50% 50%;
+      }
+
+      #bfc-a-card-glow {
+        position: absolute;
+        left: 50%;
+        top: 28%;
+        width: 420px;
+        height: 420px;
+        margin-left: -210px;
+        margin-top: -210px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 229, 199, 0.28) 0%, transparent 68%);
+        opacity: 0.85;
+        pointer-events: none;
+      }
+
+      #bfc-a-bars {
+        position: absolute;
+        left: 80px;
+        right: 80px;
+        bottom: 160px;
+        height: 96px;
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+      }
+
+      .bfc-bar {
+        flex: 1;
+        border-radius: 6px 6px 2px 2px;
+        background: linear-gradient(180deg, var(--accent-color) 0%, rgba(0, 229, 199, 0.25) 100%);
+        transform-origin: 50% 100%;
+        height: 40%;
+      }
+
+      #bfc-intro {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 72px;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 20;
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      #bfc-intro-label {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--bfc-muted);
+        padding: 10px 18px;
+        border: 1px solid var(--bfc-line);
+        border-radius: 999px;
+        background: rgba(11, 13, 16, 0.55);
+        backdrop-filter: blur(8px);
+      }
+
+      #bfc-hit-type {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 30;
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      #bfc-hit-type-text {
+        font-size: 160px;
+        font-weight: 900;
+        letter-spacing: -0.04em;
+        text-transform: uppercase;
+        color: var(--bfc-ink);
+        text-shadow:
+          0 0 40px rgba(0, 229, 199, 0.35),
+          0 8px 40px rgba(0, 0, 0, 0.55);
+        -webkit-text-stroke: 2px rgba(0, 0, 0, 0.35);
+        paint-order: stroke fill;
+      }
+
+      #bfc-vignette {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 15;
+        background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 45%, rgba(0, 0, 0, 0.55) 100%);
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="bfc-root"
+      data-composition-id="beat-freeze-cut"
+      data-start="0"
+      data-duration="6"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="bfc-bg" aria-hidden="true"></div>
+      <div id="bfc-grid" aria-hidden="true"></div>
+
+      <div id="bfc-stage">
+        <div id="bfc-shot-a">
+          <div id="bfc-a-crop">
+            <div id="bfc-a-card">
+              <div id="bfc-a-card-glow" aria-hidden="true"></div>
+              <div id="bfc-a-bars" aria-hidden="true">
+                <div class="bfc-bar" id="bfc-bar-0" style="height: 34%"></div>
+                <div class="bfc-bar" id="bfc-bar-1" style="height: 58%"></div>
+                <div class="bfc-bar" id="bfc-bar-2" style="height: 42%"></div>
+                <div class="bfc-bar" id="bfc-bar-3" style="height: 78%"></div>
+                <div class="bfc-bar" id="bfc-bar-4" style="height: 52%"></div>
+                <div class="bfc-bar" id="bfc-bar-5" style="height: 88%"></div>
+                <div class="bfc-bar" id="bfc-bar-6" style="height: 46%"></div>
+                <div class="bfc-bar" id="bfc-bar-7" style="height: 64%"></div>
+                <div class="bfc-bar" id="bfc-bar-8" style="height: 36%"></div>
+                <div class="bfc-bar" id="bfc-bar-9" style="height: 72%"></div>
+                <div class="bfc-bar" id="bfc-bar-10" style="height: 48%"></div>
+                <div class="bfc-bar" id="bfc-bar-11" style="height: 92%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="bfc-vignette" aria-hidden="true"></div>
+      <div id="bfc-intro" aria-hidden="true">
+        <span id="bfc-intro-label">ON THE BEAT</span>
+      </div>
+      <div id="bfc-hit-type" aria-hidden="true">
+        <span id="bfc-hit-type-text">DROP</span>
+      </div>
+      <div style="position:absolute;right:28px;bottom:18px;z-index:40;font-size:18px;color:rgba(244,246,248,0.5);font-family:sans-serif;pointer-events:none;">Motion by hyperframes</div>
+    </div>
+
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+
+        // EDIT ME (block-level CONFIG)；集成层经 window.__BLOCK_CONFIG 覆盖
+        var CONFIG = Object.assign(
+          {
+            primaryLabel: "be 动词",
+            secondaryLabel: "现在进行时",
+            beat1: 0.7,
+            beat2: 2.2,
+            freezeTime: 2.2,
+            intensity: 1.0,
+          },
+          window.__BLOCK_CONFIG || {}
+        );
+
+        var DURATION = 6;
+        var intensity = Math.max(0.6, Math.min(1.4, Number(CONFIG.intensity) || 1));
+        var beat1 = Number(CONFIG.beat1) || 0.7;
+        var freezeAt = Number(CONFIG.freezeTime) || 2.2;
+
+        var root = document.getElementById("bfc-root");
+        var stage = document.getElementById("bfc-stage");
+        var aCrop = document.getElementById("bfc-a-crop");
+        var aCard = document.getElementById("bfc-a-card");
+        var intro = document.getElementById("bfc-intro");
+        var introLabel = document.getElementById("bfc-intro-label");
+        var hitType = document.getElementById("bfc-hit-type");
+        var hitText = document.getElementById("bfc-hit-type-text");
+
+        if (hitText) hitText.textContent = CONFIG.primaryLabel || "DROP";
+        if (introLabel) introLabel.textContent = CONFIG.secondaryLabel || "ON THE BEAT";
+
+        var tl = gsap.timeline({ paused: true });
+        tl.to({}, { duration: DURATION, ease: "none" }, 0);
+
+        gsap.set(stage, { scale: 1, x: 0, y: 0 });
+        gsap.set(aCard, { scale: 0.9, y: 20, opacity: 1 });
+        gsap.set(intro, { opacity: 0, visibility: "hidden", y: -12 });
+        gsap.set(hitType, { opacity: 0, visibility: "hidden", scale: 1.15 });
+
+        // 0.00–0.70: intro push-in
+        tl.to(aCard, { scale: 1, y: 0, duration: 0.55, ease: "power3.out" }, 0);
+        tl.to(stage, { scale: 1 + 0.04 * intensity, duration: 0.7, ease: "power1.out" }, 0);
+        tl.set(intro, { visibility: "visible" }, 0.12);
+        tl.to(intro, { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 0.12);
+        tl.to(intro, { opacity: 0, y: -8, duration: 0.18, ease: "power2.in" }, 0.52);
+        tl.set(intro, { visibility: "hidden", opacity: 0 }, 0.7);
+
+        // 0.70–1.35: beat 1 reframe
+        tl.to(aCrop, {
+          scale: 1 + 0.18 * intensity, x: -80 * intensity, y: 24 * intensity,
+          duration: 0.22, ease: "power4.out",
+        }, beat1);
+
+        // 1.35–freezeAt: ramp into freeze
+        var rampStart = 1.35;
+        var rampDur = Math.max(0.2, freezeAt - rampStart);
+        tl.to(aCrop, {
+          scale: 1.28, x: 28 * intensity, y: -12 * intensity,
+          duration: rampDur, ease: "power3.in",
+        }, rampStart);
+        tl.to(stage, {
+          scale: 1.12, filter: "blur(0px) brightness(1.08)",
+          duration: rampDur, ease: "power2.in",
+        }, rampStart);
+
+        // freezeAt–freezeAt+0.8: freeze hit
+        tl.set(hitType, { visibility: "visible", opacity: 1, scale: 1 }, freezeAt);
+        tl.to(stage, {
+          scale: 1.12, filter: "blur(0px) brightness(1.15)",
+          duration: 0.05, ease: "power4.out",
+        }, freezeAt);
+        tl.to(hitType, { opacity: 0, scale: 0.96, duration: 0.2, ease: "power2.in" }, freezeAt + 0.55);
+        tl.set(hitType, { visibility: "hidden", opacity: 0 }, freezeAt + 0.78);
+
+        // freezeAt+0.8–6.0: settle + hold
+        tl.to(stage, { scale: 1.0, filter: "blur(0px) brightness(1)", duration: 0.5, ease: "sine.out" }, freezeAt + 0.8);
+        tl.to({}, { duration: DURATION - freezeAt - 0.8 - 0.5, ease: "none" }, freezeAt + 0.8 + 0.5);
+
+        window.__timelines["beat-freeze-cut"] = tl;
+      })();
+    </script>
+  </body>
+</html>
