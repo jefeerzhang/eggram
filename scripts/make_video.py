@@ -39,6 +39,8 @@ from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker
     _motion_probe_states,
     apply_motion_css_vars,
     frame_motion_state,
+    formula_motion_vars,
+    formula_parts_for_motion,
     highlight_body,
     load_env,
     load_layout,
@@ -526,20 +528,34 @@ def main():
                 sys.exit(2)
             page.set_content(html)
             motion = resolve_motion(sc, motion_enabled)
+            fparts = formula_parts_for_motion(sc)
             n_frames = frame_counts[i]
             is_static = all(e["type"] == "none" for e in motion) or n_frames == 1
             if is_static:
-                apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
+                # 整页一帧复用：公式动效取末态，不停在入场中途
+                fvars = (
+                    formula_motion_vars(fparts, 1.0, 1.0) if fparts is not None else None
+                )
+                apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0), fvars)
                 shot = page.screenshot(type="png")
                 for _ in range(n_frames):
                     ff_stdin.write(shot)
                     gi += 1
             else:
                 narr_frames = narr_frames_list[i]
+                narr_seconds = narr_frames / float(FPS)
                 for k in range(n_frames):
                     # 秒语义：elapsed=k/fps，旁白终点=narr_frames/fps；hold/尾垫冻结末态
+                    # 公式分步与整页动效共用这一天 clock，超时长由 formula_motion_vars 夹紧
+                    fvars = (
+                        formula_motion_vars(fparts, k / float(FPS), narr_seconds)
+                        if fparts is not None
+                        else None
+                    )
                     apply_motion_css_vars(
-                        page, *frame_motion_state(motion, k, FPS, narr_frames)
+                        page,
+                        *frame_motion_state(motion, k, FPS, narr_frames),
+                        fvars,
                     )
                     ff_stdin.write(page.screenshot(type="png"))
                     gi += 1

@@ -799,6 +799,37 @@ def _matrix(css_transform):
     return [float(x) for x in css_transform[css_transform.index("(") + 1 : -1].split(",")]
 
 
+def _formula_sc(**over):
+    sc = {
+        "kind": "rule", "layout_variant": "formula", "header": "H", "sub": "s",
+        "body": "B", "narrate": "N",
+        "formula": {
+            "num": "A", "den": "B",
+            "parts": [
+                {"id": "num", "label": "1", "text": "t1"},
+                {"id": "den", "label": "2", "text": "t2"},
+            ],
+        },
+    }
+    sc.update(over)
+    return sc
+
+
+def test_formula_parts_for_motion_only_on_rule_formula_with_parts():
+    sc = _formula_sc()
+    assert sg.formula_parts_for_motion(sc) == sc["formula"]["parts"]
+    # 非 formula 变体 / 非 rule 页 / 无 formula / parts 缺失或为空 → 不叠加
+    assert sg.formula_parts_for_motion(_formula_sc(layout_variant="side")) is None
+    assert sg.formula_parts_for_motion(_formula_sc(kind="example")) is None
+    assert sg.formula_parts_for_motion(_formula_sc(formula="R = A/B")) is None
+    no_parts = _formula_sc()
+    del no_parts["formula"]["parts"]
+    assert sg.formula_parts_for_motion(no_parts) is None
+    assert sg.formula_parts_for_motion(_formula_sc(formula={"num": "A", "den": "B", "parts": []})) is None
+    # 普通 rule 页（根本没走变体）同样为 None
+    assert sg.formula_parts_for_motion({"kind": "rule", "body": "x"}) is None
+
+
 def test_formula_motion_css_hooks_present():
     for token in ("--m-card-y", "--m-card-elev", "--m-frac-bar", "--m-part-on", "--m-formula-hl"):
         assert token in sg.MOTION_CSS, token
@@ -814,17 +845,7 @@ def test_formula_motion_css_hooks_present():
 
 
 def test_browser_formula_vars_drive_computed_style(browser):
-    sc = {
-        "kind": "rule", "layout_variant": "formula", "header": "H", "sub": "s",
-        "body": "B", "narrate": "N",
-        "formula": {
-            "num": "A", "den": "B",
-            "parts": [
-                {"id": "num", "label": "1", "text": "t1"},
-                {"id": "den", "label": "2", "text": "t2"},
-            ],
-        },
-    }
+    sc = _formula_sc()
     parts = sc["formula"]["parts"]
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
