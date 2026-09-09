@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import make_video as mv  # noqa: E402
+import storyboard_gate as sg  # noqa: E402
 
 SAMPLE = os.path.join(ROOT, "examples", "now_progressing.json")
 
@@ -385,7 +387,7 @@ def test_validate_layouts_rejects_inline_baked_style(monkeypatch):
         path = os.path.join(tmp, "layout-rule.html")
         with open(path, "a", encoding="utf-8") as f:
             f.write('<div style="font-size:30px">x</div>')
-        monkeypatch.setattr(mv, "TEMPLATE_DIR", tmp)
+        monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
         errs = mv.validate_layouts()
         assert any(
             "HTML 属性 style 烘焙" in e and "layout-rule.html" in e for e in errs
@@ -405,7 +407,7 @@ def test_validate_layouts_allows_margin_padding(monkeypatch):
         path = os.path.join(tmp, "layout-title.html")
         with open(path, "a", encoding="utf-8") as f:
             f.write('<div style="margin-top:26px">x</div>')
-        monkeypatch.setattr(mv, "TEMPLATE_DIR", tmp)
+        monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
         errs = mv.validate_layouts()
         assert not any("HTML 属性 style 烘焙" in e for e in errs), errs
     finally:
@@ -435,6 +437,132 @@ def test_side_example_accepts_independent_wrong_body():
     sc.update(layout_variant="side", wrong_body="He **reading**.")
     errors, _ = mv.validate_storyboard(tpl)
     assert errors == []
+
+
+# ---- 09 独立闸门（storyboard_gate）：唯一规则源 ----
+
+
+def test_gate_module_imports_no_heavy_deps():
+    """闸门模块必须保持纯 stdlib：不拉 playwright/numpy/imageio_ffmpeg。"""
+    code = (
+        "import sys, storyboard_gate;"
+        "heavy = {'playwright', 'numpy', 'imageio_ffmpeg'} & set(sys.modules);"
+        "assert not heavy, f'heavy imports leaked: {heavy}'"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.join(ROOT, "scripts"),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=dict(os.environ, PYTHONUTF8="1"),
+        timeout=60,
+    )
+    assert r.returncode == 0, r.stderr
+
+
+def _write_gate_storyboard(path, **scene_overrides):
+    tpl = {
+        "title": "Gate",
+        "voice": "mimo_default",
+        "fps": 2,
+        "scenes": [
+            {"kind": "rule", "header": "H", "sub": "S", "body": "**B**", "narrate": "N"}
+        ],
+    }
+    tpl["scenes"][0].update(**scene_overrides)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(tpl, f, ensure_ascii=False)
+    return tpl
+
+
+def test_validator_and_renderer_cli_agree_on_gate_failure():
+    """同一非法分镜，独立校验与渲染器必须给出同一诊断、同一退出码。"""
+    tmp = tempfile.mkdtemp(prefix="mv_gate_cli_")
+    path = os.path.join(tmp, "bad_motion.json")
+    try:
+        _write_gate_storyboard(path, motion="bogus")
+        env = dict(os.environ, PYTHONUTF8="1")
+        v = subprocess.run(
+            [sys.executable, "scripts/validate_storyboard.py", path],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+            env=env, timeout=60,
+        )
+        r = subprocess.run(
+            [sys.executable, "scripts/make_video.py", path, "--reuse-audio"],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+            env=env, timeout=120,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    assert v.returncode == 2, v.stdout + v.stderr
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "未知 motion='bogus'" in v.stdout and "试渲染失败" in v.stdout
+    assert "未知 motion='bogus'" in r.stdout and "试渲染失败" in r.stdout
+    assert "VALIDATION FAILED" in v.stdout and "VALIDATION FAILED" in r.stdout
+
+
+def test_prepare_storyboard_resolves_variant_and_fallback():
+    tpl = load_sample()
+    example = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
+    rule = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "rule")
+    example.update(layout_variant="side", wrong_body="He **reading**.")
+    rule["layout_variant"] = "side"
+    prep = sg.prepare_storyboard(tpl)
+    assert prep["errors"] == []
+    assert {e["layout_file"] for e in prep["scenes"] if e["variant"] == "side"} == {
+        "layout-example-side.html",
+        "layout-rule-side.html",
+    }
+    rule["layout_variant"] = "nope"  # 未知变体 → 回退默认
+    prep2 = sg.prepare_storyboard(tpl)
+    assert prep2["errors"] == []
+    fallback = next(e for e in prep2["scenes"] if e["variant"] == "nope")
+    assert fallback["layout_file"] == "layout-rule.html"
+    assert fallback["html"] == sg.render_html(
+        rule, prep2["W"], prep2["H"], prep2["style"], motion_enabled=True
+    )
+
+
+def test_validate_layouts_checks_existing_variant_slots(monkeypatch):
+    """存在的变体文件按 kind 基础槽位 + 变体专属槽位校验；缺失变体文件不报错。"""
+    tmp = tempfile.mkdtemp(prefix="mv_gate_variant_")
+    try:
+        for kind, fn in mv.LAYOUT_FILES.items():
+            with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
+                f.write(_minimal_layout(kind))
+        # rule side 变体：基于基础槽位但缺 __ZH__ → 应报缺槽
+        with open(os.path.join(tmp, "layout-rule-side.html"), "w", encoding="utf-8") as f:
+            f.write(_minimal_layout("rule"))
+        monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
+        errs = mv.validate_layouts()
+        assert any("layout-rule-side.html" in e and "__ZH__" in e for e in errs), errs
+        # 变体文件补齐后不再报
+        with open(os.path.join(tmp, "layout-rule-side.html"), "w", encoding="utf-8") as f:
+            f.write(_minimal_layout("rule") + " __ZH__")
+        errs2 = mv.validate_layouts()
+        assert not any("layout-rule-side.html" in e for e in errs2), errs2
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_env_explicit_env_wins_over_dotenv(monkeypatch):
+    """load_env 不覆盖显式环境变量；缺 dotenv 包时静默跳过。"""
+    pytest.importorskip("dotenv")
+    tmp = tempfile.mkdtemp(prefix="mv_gate_env_")
+    try:
+        with open(os.path.join(tmp, ".env"), "w", encoding="utf-8") as f:
+            f.write("MV_GATE_TEST_VAR=from_file\n")
+        monkeypatch.setattr(sg, "ROOT", tmp)
+        monkeypatch.delenv("MV_GATE_TEST_VAR", raising=False)
+        sg.load_env()
+        assert os.environ.get("MV_GATE_TEST_VAR") == "from_file"
+        monkeypatch.setenv("MV_GATE_TEST_VAR", "explicit")
+        sg.load_env()
+        assert os.environ.get("MV_GATE_TEST_VAR") == "explicit"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.environ.pop("MV_GATE_TEST_VAR", None)
 
 
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
