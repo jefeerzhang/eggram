@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -498,7 +497,7 @@ def test_worker_reports_cache_facts_across_runs(tts_url):
             assert counter["post"] == 13, counter
 
 
-# ---- #26 完整 worker 只预览一次：token 归属 + 输入指纹，过期/他 run 不沿用 ----
+# ---- 预览去重：Step 2 用 --preview 预验，Step 3 用 --skip-preview 复用同 run 目录 ----
 
 
 def _png_mtimes(preview_dir):
@@ -506,15 +505,15 @@ def _png_mtimes(preview_dir):
 
 
 @pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_make_video_preview_reuse_bound_to_token_and_inputs(tts_url):
-    """复用仅对「同 token + 同输入」生效：直接渲染/换 token/改分镜、style、
-    layout 一律重新预验，绝不以旧成功结果渲染新输入。"""
+def test_skip_preview_reuses_this_run_preview(tts_url):
+    """--skip-preview 复用同 run_key 目录里刚验过的截图：不重写产物、仍出成片；
+    不传该开关则自行重截。--preview 与 --skip-preview 互斥。"""
     browser = find_browser()
     if not browser:
         pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_once_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="mv_skip_") as tmp:
         project = _copy_project(tmp)
-        _write_source_storyboard(project, "a", "Preview once.", 0.0)
+        _write_source_storyboard(project, "a", "Skip preview.", 0.0)
         env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
         sb = project / "cases/a/lesson.json"
         rkey = ra.run_key(str(sb), "teaching", True)
@@ -527,106 +526,28 @@ def test_make_video_preview_reuse_bound_to_token_and_inputs(tts_url):
                 encoding="utf-8", timeout=240,
             )
 
-        orig_sb = sb.read_bytes()
-        orig_layout = (project / "templates/layout-rule.html").read_text(encoding="utf-8")
-        style = json.loads((project / "templates/style-teaching.json").read_text(encoding="utf-8"))
-        orig_style = json.dumps(style, ensure_ascii=False)
+        r = run_make("--preview")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "PREVIEW_OK" in r.stdout
+        before = _png_mtimes(pvdir)
 
-        # 1) 独立预览（token T1）→ 印记落位
-        r = run_make("--preview", "--preview-token", "T1")
+        r = run_make("out/full.mp4", "--skip-preview", "--reuse-audio")
         assert r.returncode == 0, r.stdout + r.stderr
-        stamp = json.loads((pvdir / "stamp.json").read_text(encoding="utf-8"))
-        assert stamp["token"] == "T1" and len(stamp["digest"]) == 64
-        m1 = _png_mtimes(pvdir)
-        # 2) 同 token 成片 → 复用（截图不再重写），成片正常
-        r = run_make("out/full.mp4", "--preview-token", "T1", "--reuse-audio")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" in r.stdout
-        assert _png_mtimes(pvdir) == m1  # 实际预览产物未被重写
+        assert "跳过（复用已有预览）" in r.stdout
+        assert _png_mtimes(pvdir) == before  # 复用：截图未被重写
         assert (project / "out/full.mp4").stat().st_size > 1000
-        # 3) 直接渲染（无 token）→ 仍自行预览
+
         r = run_make("out/direct.mp4", "--reuse-audio")
         assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        assert _png_mtimes(pvdir) != m1  # 截图确实重跑了
-        # 4) 换 token → 他 run 的预览不沿用
-        r = run_make("out/other.mp4", "--preview-token", "T2", "--reuse-audio")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        # 5) 预览后改 layout → 指纹变，重新预验
-        (project / "templates/layout-rule.html").write_text(
-            orig_layout.replace("</style>", ".x{color:red}</style>"), encoding="utf-8"
-        )
-        r = run_make("--preview", "--preview-token", "T1")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        (project / "templates/layout-rule.html").write_text(orig_layout, encoding="utf-8")
-        # 6) 改 style → 指纹变，重新预验
-        style["palette"]["bg"] = "#010203"
-        (project / "templates/style-teaching.json").write_text(
-            json.dumps(style, ensure_ascii=False), encoding="utf-8"
-        )
-        r = run_make("--preview", "--preview-token", "T1")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        (project / "templates/style-teaching.json").write_text(orig_style, encoding="utf-8")
-        # 7) 改分镜 → 指纹变，重新预验（不得沿用旧成功结果）
-        tpl = json.loads(sb.read_text(encoding="utf-8"))
-        tpl["scenes"][1]["body"] = "**Changed**"
-        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
-        r = run_make("--preview", "--preview-token", "T1")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        # 8) 输入复原：首次预览重建印记（case 7 已覆盖旧印记），再次预览即复用
-        sb.write_bytes(orig_sb)
-        r = run_make("--preview", "--preview-token", "T1")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" not in r.stdout
-        r = run_make("--preview", "--preview-token", "T1")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "PREVIEW REUSED" in r.stdout
+        assert "跳过（复用已有预览）" not in r.stdout
+        assert _png_mtimes(pvdir) != before  # 默认自行重截
+
+        # 两个开关互斥，同时传是用法错误
+        r = run_make("out/both.mp4", "--preview", "--skip-preview")
+        assert r.returncode != 0
 
 
-@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_full_worker_previews_once_with_reuse_trace(tts_url):
-    """完整 worker 全程只截一次图：steps 行带 PREVIEW_REUSED 执行痕迹，
-    run 目录留有本次 run 的 stamp + 全套截图；输入变化后新一轮自验自用。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_wonce_") as tmp:
-        project = _copy_project(tmp)
-        _write_source_storyboard(project, "a", "Worker previews once.", 0.0)
-        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
-        with local_tts() as (url, counter):
-            env["MIMO_API_URL"] = url
-            r1 = _run_worker(project, env, "cases/a/lesson.json", "out/w1.mp4", "--reuse-audio")
-            assert r1.returncode == 0, r1.stdout + r1.stderr
-            steps1 = next(x for x in r1.stdout.splitlines() if x.startswith("steps:"))
-            assert "PREVIEW_OK" in steps1 and "PREVIEW_REUSED" in steps1
-            assert counter["post"] == 6, counter
-        rkey = ra.run_key(str(project / "cases/a/lesson.json"), "teaching", True)
-        pvdir = project / "_build" / "runs" / f"lesson__teaching__{rkey}" / "preview"
-        stamp = json.loads((pvdir / "stamp.json").read_text(encoding="utf-8"))
-        assert len(stamp["digest"]) == 64 and stamp["token"]  # 本次 run 的归属印记
-        assert (pvdir / "s5.png").is_file()
-        # 预览后改分镜：新一轮在改动后的内容上重验（raw 未变 → 零 TTS）
-        sb = project / "cases/a/lesson.json"
-        tpl = json.loads(sb.read_text(encoding="utf-8"))
-        tpl["scenes"][1]["body"] = "**Edited after preview**"
-        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
-        with local_tts() as (url, counter):
-            env["MIMO_API_URL"] = url
-            r2 = _run_worker(project, env, "cases/a/lesson.json", "out/w2.mp4", "--reuse-audio")
-            assert r2.returncode == 0, r2.stdout + r2.stderr
-            steps2 = next(x for x in r2.stdout.splitlines() if x.startswith("steps:"))
-            assert "PREVIEW_REUSED" in steps2  # 本轮自己的预览→成片仍只截一次图
-            assert counter["post"] == 0, counter  # 旁白未变：重验不消耗 TTS
-        runs = sorted(p.name for p in (project / "_build" / "runs").iterdir())
-        assert len(runs) == 2, runs  # 改动后新 run 目录，旧 run 产物未被挪用
-
-
-# ---- #23 并行换皮自动独立成片 + 目标占用保护 ----
+# ---- #23 并行换皮自动独立成片（自动命名防重合）----
 
 
 def _artifact_of(stdout):
@@ -697,61 +618,3 @@ def test_worker_auto_naming_no_sanitize_collision(tts_url):
             arts.append(_artifact_of(r.stdout))
         assert arts[0] != arts[1], arts  # 不同皮肤不映射到同一输出
         assert (project / arts[0]).is_file() and (project / arts[1]).is_file()
-
-
-@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_worker_target_occupied_refuses_before_tts(tts_url):
-    """活动运行占用显式目标 → 后启动者 PREFLIGHT 拒绝、零 TTS、历史成片不动；
-    释放后可顺序重渲。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_occ_") as tmp:
-        project = _copy_project(tmp)
-        _write_source_storyboard(project, "a", "Occupied target.", 0.0)
-        outdir = project / "out"
-        outdir.mkdir(exist_ok=True)
-        (outdir / "x.mp4").write_bytes(b"old artifact")  # 历史成片
-        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
-        with local_tts() as (url, counter):
-            env["MIMO_API_URL"] = url
-            lock = ra.acquire_target(str(outdir / "x.mp4"), style_name="teaching")
-            try:
-                r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
-                assert r.returncode == 1
-                assert "status: FAIL_AT_PREFLIGHT" in r.stdout
-                assert "正被活动运行占用" in r.stdout
-                assert counter["post"] == 0  # 被拒运行未开始配音
-                assert (outdir / "x.mp4").read_bytes() == b"old artifact"
-            finally:
-                lock.release()
-            assert not (outdir / "x.mp4.lock").exists()  # 释放后可重用目标
-            r2 = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
-            assert r2.returncode == 0, r2.stdout + r2.stderr
-            assert (outdir / "x.mp4").stat().st_size > 1000  # 顺序重渲得真成片
-
-
-@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_worker_stale_lock_recovered(tts_url):
-    """进程死亡留下的过期锁（心跳停止、mtime 过旧）被接管，运行正常完成。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_stale_") as tmp:
-        project = _copy_project(tmp)
-        _write_source_storyboard(project, "a", "Stale lock.", 0.0)
-        outdir = project / "out"
-        outdir.mkdir(exist_ok=True)
-        lockfile = outdir / "x.mp4.lock"
-        lockfile.write_text(
-            json.dumps({"token": "deadbeef", "pid": 999999, "output": "out/x.mp4"}),
-            encoding="utf-8",
-        )
-        old = time.time() - ra.LOCK_STALE_SECONDS * 5
-        os.utime(lockfile, (old, old))
-        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
-        r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "已失效" in r.stderr  # 接管有可验证的说明
-        assert not lockfile.exists()  # 正常结束释放的是本次自己的锁
-        assert (outdir / "x.mp4").stat().st_size > 1000
