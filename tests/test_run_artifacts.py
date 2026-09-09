@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import wave
 
 import numpy as np
@@ -248,5 +249,55 @@ def test_verify_wrong_style_flag_does_not_match_run(project, ffmpeg):
         r = _run_verify(project, sb, mp4, "--style", "classroom")  # 渲染是 teaching
         assert r.returncode == 4, r.stdout + r.stderr
         assert "missing scene audio" in r.stderr
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+# ---- #23 自动命名与目标占用 ----
+
+
+def test_default_output_name_binds_skin_without_collision():
+    # 无需规范化的皮肤：干净命名
+    assert ra.default_output_name("lesson", "teaching") == "output/lesson__teaching.mp4"
+    # 规范化会重合的两个皮肤（"a b" 与 "a_b"）→ 不同输出
+    a = ra.default_output_name("lesson", "a b")
+    b = ra.default_output_name("lesson", "a_b")
+    assert a != b
+    assert "a_b" in a and "a_b" in b
+    # 同名皮肤 → 同名输出（确定性）
+    assert ra.default_output_name("lesson", "a b") == a
+
+
+def test_acquire_target_blocks_and_releases():
+    d = _mkdtemp("ra_lock_")
+    try:
+        target = os.path.join(d, "out.mp4")
+        lock1 = ra.acquire_target(target)
+        try:
+            with pytest.raises(ra.TargetOccupied) as ei:
+                ra.acquire_target(target)
+            assert "正被活动运行占用" in str(ei.value)
+            assert ei.value.info.get("pid") == os.getpid()
+        finally:
+            lock1.release()
+        assert not os.path.exists(target + ".lock")  # 释放后目标可重用
+        lock2 = ra.acquire_target(target)
+        lock2.release()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_acquire_target_steals_stale_lock():
+    d = _mkdtemp("ra_stale_")
+    try:
+        target = os.path.join(d, "out.mp4")
+        lock = target + ".lock"
+        with open(lock, "w", encoding="utf-8") as f:
+            json.dump({"token": "dead", "pid": 1}, f)
+        old = time.time() - ra.LOCK_STALE_SECONDS * 5
+        os.utime(lock, (old, old))
+        lock2 = ra.acquire_target(target)  # 失效占用被接管，不抛
+        lock2.release()
+        assert not os.path.exists(lock)
     finally:
         shutil.rmtree(d, ignore_errors=True)

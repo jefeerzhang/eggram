@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -21,6 +22,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from make_video import FFMPEG, find_browser  # noqa: E402
+import run_artifacts as ra  # noqa: E402
 
 
 @pytest.fixture
@@ -100,7 +102,12 @@ def test_worker_accepts_preview_configuration_overrides(tts_url, override):
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "status: OK" in result.stdout
-        assert (project / "output/lesson.mp4").stat().st_size > 0
+        # #23 自动命名：省略 output 时绑定最终皮肤（不再固定 output/lesson.mp4）
+        artifact = next(
+            line.split(": ", 1)[1] for line in result.stdout.splitlines() if line.startswith("artifact: ")
+        )
+        assert "lesson__" in artifact and artifact.endswith(".mp4"), artifact
+        assert (project / artifact).stat().st_size > 0
 
 
 @pytest.mark.parametrize("tts_url", [6], indirect=True)
@@ -449,3 +456,134 @@ def test_worker_success_and_standalone_verify_marks_are_honest(tts_url):
         assert v2.returncode == 0, v2.stdout + v2.stderr
         assert "VERIFY_OK [··✓✓✓✓]" in v2.stdout
         assert "reuse-confirmed" in v2.stdout
+
+
+# ---- #23 并行换皮自动独立成片 + 目标占用保护 ----
+
+
+def _artifact_of(stdout):
+    return next(
+        line.split(": ", 1)[1] for line in stdout.splitlines() if line.startswith("artifact: ")
+    )
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_three_skins_parallel_auto_outputs(tts_url):
+    """同一分镜三种皮肤省略 output 真并行：三个不同可播成片，验收互不污染。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_par3_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Three skins narration.", 0.0)
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        jobs = [
+            (["cases/a/lesson.json", "--reuse-audio"], "lesson__teaching"),
+            (["cases/a/lesson.json", "--reuse-audio", "--style", "classroom"], "lesson__classroom"),
+            (["cases/a/lesson.json", "--reuse-audio", "--style", "explainer"], "lesson__explainer"),
+        ]
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            results = list(ex.map(
+                lambda j: _run_worker(project, env, *j[0]), jobs
+            ))
+        artifacts = []
+        for (flags, want), r in zip(jobs, results):
+            assert r.returncode == 0, r.stdout + r.stderr
+            art = _artifact_of(r.stdout)
+            assert want in art and art.endswith(".mp4"), art  # 自动命名绑定皮肤
+            mp4 = project / art
+            assert mp4.is_file() and mp4.stat().st_size > 0, art
+            artifacts.append(art)
+        assert len(set(artifacts)) == 3, artifacts  # 三皮肤三个不同输出
+        # 各自验收互不污染：verify 按各自 run（style 参与定位）独立通过
+        for art, style_flag in zip(artifacts, ([], ["--style", "classroom"], ["--style", "explainer"])):
+            v = subprocess.run(
+                [sys.executable, "scripts/worker_verify.py", "cases/a/lesson.json", art, *style_flag],
+                cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+            )
+            assert v.returncode == 0, v.stdout + v.stderr
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_auto_naming_no_sanitize_collision(tts_url):
+    """皮肤名规范化会重合（"a b" 与 "a_b"）→ 自动输出必须仍不同。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_name_col_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Name collision.", 0.0)
+        base = (project / "templates/style-classroom.json").read_text(encoding="utf-8")
+        (project / "templates/style-a b.json").write_text(base, encoding="utf-8")
+        (project / "templates/style-a_b.json").write_text(base, encoding="utf-8")
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            results = list(ex.map(
+                lambda s: _run_worker(project, env, "cases/a/lesson.json",
+                                      "--reuse-audio", "--style", s),
+                ("a b", "a_b"),
+            ))
+        arts = []
+        for s, r in zip(("a b", "a_b"), results):
+            assert r.returncode == 0, f"[{s}] " + r.stdout + r.stderr
+            arts.append(_artifact_of(r.stdout))
+        assert arts[0] != arts[1], arts  # 不同皮肤不映射到同一输出
+        assert (project / arts[0]).is_file() and (project / arts[1]).is_file()
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_target_occupied_refuses_before_tts(tts_url):
+    """活动运行占用显式目标 → 后启动者 PREFLIGHT 拒绝、零 TTS、历史成片不动；
+    释放后可顺序重渲。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_occ_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Occupied target.", 0.0)
+        outdir = project / "out"
+        outdir.mkdir(exist_ok=True)
+        (outdir / "x.mp4").write_bytes(b"old artifact")  # 历史成片
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        with local_tts() as (url, counter):
+            env["MIMO_API_URL"] = url
+            lock = ra.acquire_target(str(outdir / "x.mp4"), style_name="teaching")
+            try:
+                r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+                assert r.returncode == 1
+                assert "status: FAIL_AT_PREFLIGHT" in r.stdout
+                assert "正被活动运行占用" in r.stdout
+                assert counter["post"] == 0  # 被拒运行未开始配音
+                assert (outdir / "x.mp4").read_bytes() == b"old artifact"
+            finally:
+                lock.release()
+            assert not (outdir / "x.mp4.lock").exists()  # 释放后可重用目标
+            r2 = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+            assert r2.returncode == 0, r2.stdout + r2.stderr
+            assert (outdir / "x.mp4").stat().st_size > 1000  # 顺序重渲得真成片
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_stale_lock_recovered(tts_url):
+    """进程死亡留下的过期锁（心跳停止、mtime 过旧）被接管，运行正常完成。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_stale_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Stale lock.", 0.0)
+        outdir = project / "out"
+        outdir.mkdir(exist_ok=True)
+        lockfile = outdir / "x.mp4.lock"
+        lockfile.write_text(
+            json.dumps({"token": "deadbeef", "pid": 999999, "output": "out/x.mp4"}),
+            encoding="utf-8",
+        )
+        old = time.time() - ra.LOCK_STALE_SECONDS * 5
+        os.utime(lockfile, (old, old))
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "已失效" in r.stderr  # 接管有可验证的说明
+        assert not lockfile.exists()  # 正常结束释放的是本次自己的锁
+        assert (outdir / "x.mp4").stat().st_size > 1000

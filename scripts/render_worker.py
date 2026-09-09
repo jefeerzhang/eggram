@@ -15,9 +15,15 @@ Step 1/2 结果合成（#25），不解析日志字符位置，未检查项绝�
 style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker 并行互踩
 不再可能；raw 旁白仍共享 `_build/<slug>/`（换皮复用）。verify 传相同的
 --style/--no-motion 以精确重定位本次运行。
+输出目标（#23）：省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`
+（皮肤名被规范化改写时追加短指纹防重合），同分镜多皮肤并行各得一个成片；
+显式 output 永远优先。活动运行竞争同一目标时，后启动者在 TTS/MP4 写入前
+被拒（FAIL_AT_PREFLIGHT + 占用诊断）；目标锁 `<output>.lock` 心跳保活，
+成功/失败/崩溃都释放，进程死亡后锁过期可接管，历史成片不删除。
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -25,6 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
+import run_artifacts as ra  # noqa: E402
 import worker_result as wr  # noqa: E402
 
 
@@ -69,7 +76,10 @@ def main():
         prog="render_worker.py", description="渲染 worker：5 步流水线，不可绕过"
     )
     ap.add_argument("storyboard", help="分镜 JSON 路径")
-    ap.add_argument("output", nargs="?", default=None, help="缺省 output/<slug>.mp4")
+    ap.add_argument(
+        "output", nargs="?", default=None,
+        help="缺省 output/<slug>__<皮肤>.mp4（#23 自动命名，绑定分镜+最终皮肤）",
+    )
     g = ap.add_mutually_exclusive_group()
     g.add_argument(
         "--reuse-audio", action="store_true", help="复用音频缓存（默认应显式传）"
@@ -96,8 +106,31 @@ def main():
 
     sb = args.storyboard
     slug = os.path.splitext(os.path.basename(sb))[0]
-    out = args.output or f"output/{slug}.mp4"
+    # 自动命名（#23）：绑定最终皮肤（--style > 分镜顶层 style > teaching），
+    # 三皮肤并行省略 output 也各得一个成片；显式 output 永远优先
+    style_name = args.style
+    if not style_name:
+        try:
+            with open(sb, encoding="utf-8") as f:
+                style_name = json.load(f).get("style", "teaching")
+        except (OSError, ValueError):
+            style_name = "teaching"  # 缺/坏分镜由 preflight 报错，此处仅兜底命名
+    out = args.output or ra.default_output_name(slug, style_name)
 
+    # 目标占用（#23）：TTS / MP4 写入前拒绝后启动者；成功、失败、崩溃都释放
+    try:
+        lock = ra.acquire_target(out, storyboard=sb, style_name=style_name)
+    except ra.TargetOccupied as e:
+        emit("FAIL_AT_PREFLIGHT", diagnostic=str(e))
+        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
+
+    try:
+        _pipeline(args, sb, out)
+    finally:
+        lock.release()
+
+
+def _pipeline(args, sb, out):
     # Step 1 preflight（含浏览器时点检查；exit 3 语义已在其中处理）
     rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
