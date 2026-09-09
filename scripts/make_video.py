@@ -4,13 +4,13 @@ make_video.py — 教学微课渲染器（Skill 阶段 2）
 分镜 JSON → 静态闸门（storyboard_gate）→ 预览 → 小米 TTS → 教学动效截帧 → ffmpeg 合成 mp4
 
 用法: python scripts/make_video.py examples/now_progressing.json [输出.mp4]
-      [--style NAME] [--reuse-audio] [--no-motion] [--preview] [--preview-token TOKEN]
+      [--style NAME] [--reuse-audio] [--no-motion] [--preview | --skip-preview]
 
 闸门规则、布局选择与页面准备集中在 storyboard_gate.py（唯一规则源）；
 本模块持有运行环境与媒体管线：浏览器发现、TTS、音频加工、编码、预览探测执行。
-预览去重（#26）：成片阶段在「同 token + 同输入指纹」时复用本次 run 的有效预览
-（stamp.json），指纹覆盖分镜/style/layout 字节与 motion 开关；直接渲染无 token
-总是自行预览。
+预览去重：worker 先用 --preview 单独预验，再以 --skip-preview 渲成片，一次运行
+只截一次图。预览目录由 run_key（分镜字节 + style + motion 开关）决定，两次调用
+指向同一目录，因此跳过预览即复用刚验过的产物；输入一变 run_key 即变。
 """
 
 import argparse
@@ -24,7 +24,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import urllib.request
 
 import run_artifacts as ra  # noqa: E402  单次渲染产物归属（run_key/manifest）
@@ -36,7 +35,6 @@ from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker
     LAYOUT_VARIANTS,
     MOTIONS,
     ROLE_TO_KIND,
-    TEMPLATE_DIR,
     _motion_display_name,
     _motion_probe_states,
     apply_motion_css_vars,
@@ -70,10 +68,6 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 # 音频缓存解码版本。错误解码路径生成的旧 raw 无此版本号，缓存不命中。
 CACHE_VERSION = "2"
-
-# 预览逻辑版本（#26）：进预览有效性指纹；改预览行为（探测/截图口径）时递增，
-# 旧预览产物自动失效
-PREVIEW_STAMP_VERSION = 1
 
 MI_URL = os.environ.get(
     "MIMO_API_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
@@ -149,36 +143,21 @@ def decode_wav(data):
 
 
 def write_wav_pcm(path, pcm, rate=SAMPLE_RATE):
+    """单声道 16bit WAV 落位。
+
+    原子替换与 Windows 上目标被短暂持句柄时的退避，统一由
+    run_artifacts.atomic_write_bytes 负责（并行 worker 写同一确定性路径时，
+    读方要么旧文件要么新文件，都是完整的）。
+    """
     import wave
 
-    pcm = np.asarray(pcm, dtype=np.int16)
-    # 先写临时文件再 os.replace 原子落位：并行 worker（同 slug 换皮批）对同一
-    # 确定性内容的并发读写不再产生撕裂（读方要么旧文件要么新文件，都是完整的）。
-    # Windows 反例（#18 复测坐实）：目标被其它进程 ffmpeg 持句柄时 replace 抛
-    # WinError 5。同指纹路径的并发写内容完全确定 → 尺寸一致即视为已落位；
-    # 否则短退避重试，仍失败才抛（真异常）。
-    tmp = f"{path}.tmp{os.getpid()}"
-    try:
-        with wave.open(tmp, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(rate)
-            w.writeframes(pcm.tobytes())
-        for attempt in range(20):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:
-                try:
-                    if os.path.getsize(path) == os.path.getsize(tmp):
-                        return  # 并发同内容写入，目标已完整，读方无损
-                except OSError:
-                    pass
-                time.sleep(0.3)
-        raise RuntimeError(f"wav 原子替换失败（目标被长期占用）: {path}")
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(np.asarray(pcm, dtype=np.int16).tobytes())
+    ra.atomic_write_bytes(path, buf.getvalue())
 
 
 def _speech_bounds(speech, floor=SPEECH_FLOOR):
@@ -311,14 +290,14 @@ def build_parser():
         help="复用 _build/<lesson>/s*_<fp>_raw.wav（旁白+音色指纹命中才复用）",
     )
     p.add_argument("--no-motion", action="store_true", help="关闭 focus/pulse/zoom")
-    p.add_argument(
+    pv = p.add_mutually_exclusive_group()
+    pv.add_argument(
         "--preview", action="store_true", help="只截图+溢出探测，不调 TTS/ffmpeg"
     )
-    p.add_argument(
-        "--preview-token",
-        default=None,
-        help="worker 本次运行的预览归属标记：预览结果只供同 token 的成片复用"
-        "（#26）；直接渲染不传，总是自行预览",
+    pv.add_argument(
+        "--skip-preview",
+        action="store_true",
+        help="跳过预览直接成片：复用本 run 目录（同 run_key）里已验过的预览产物",
     )
     p.add_argument(
         "--browser",
@@ -387,37 +366,20 @@ def main():
         sys.exit(3)
 
     # 预览闸门：缩略图 + 溢出；--preview 到此结束。
-    # 去重（#26）：完整 worker 的 Step 2 已对「同 token + 同输入指纹」完成有效
-    # 预览时，成片阶段复用其产物不再重复截图；token 或指纹任一不匹配即重验，
-    # 历史成功结果与另一 run 的产物一律不沿用。直接渲染（无 token）总是自行预览。
-    stamp = {
-        "schema": ra.PREVIEW_STAMP_SCHEMA,
-        "digest": preview_stamp_digest(tpl_path, prep, motion_enabled),
-        "token": args.preview_token or "",
-        "storyboard": os.path.abspath(tpl_path),
-        "style": prep["style_name"],
-        "motion": "on" if motion_enabled else "off",
-    }
-    print("1/4 预览截图与溢出...")
-    if args.preview_token and preview_reusable(preview_out, stamp, len(scenes)):
-        print(f"   PREVIEW REUSED（本次 run 已有有效预览，跳过重复截图）→ {preview_out}")
-        preview_rc = 0
+    # 去重：完整 worker 的 Step 2 已用 --preview 验过同 run_key 的产物，
+    # 成片阶段传 --skip-preview 复用，不再重复截图。直接渲染默认自行预览。
+    if args.skip_preview:
+        print(f"1/4 预览截图与溢出... 跳过（复用已有预览）→ {preview_out}")
     else:
+        print("1/4 预览截图与溢出...")
         preview_rc = run_preview(
             tpl_path, scenes, style, W, H, motion_enabled, browser, preview_out
         )
-        if preview_rc == 0:
-            ra.write_preview_stamp(preview_out, stamp)
-        else:
-            try:
-                os.remove(ra.preview_stamp_path(preview_out))
-            except FileNotFoundError:
-                pass
-    if args.preview:
-        sys.exit(preview_rc)
-    if preview_rc != 0:
-        print("预览未通过，已跳过配音/成片。修分镜或模板后重试；或单独跑 --preview。")
-        sys.exit(preview_rc)
+        if args.preview:
+            sys.exit(preview_rc)
+        if preview_rc != 0:
+            print("预览未通过，已跳过配音/成片。修分镜或模板后重试；或单独跑 --preview。")
+            sys.exit(preview_rc)
 
     print("2/4 生成配音..." + (" (reuse-audio)" if args.reuse_audio else ""))
     wavs, durs, frame_counts, narr_frames_list = [], [], [], []
@@ -687,50 +649,6 @@ def _ffprobe_duration(path):
     return None
 
 
-def _file_sha(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def preview_stamp_digest(tpl_path, prep, motion_enabled):
-    """预览有效性指纹（#26）：分镜字节 + style 文件字节 + 本次实际 layout 文件
-    字节 + motion 开关 + 预览逻辑版本。任一变化 → 指纹变 → 旧预览不沿用。"""
-    h = hashlib.sha256()
-    h.update(f"preview-stamp v{PREVIEW_STAMP_VERSION}\0".encode("utf-8"))
-    with open(tpl_path, "rb") as f:
-        h.update(f.read())
-    style_path = os.path.join(TEMPLATE_DIR, f"style-{prep['style_name']}.json")
-    h.update(b"\0style\0")
-    h.update(_file_sha(style_path).encode("ascii"))
-    for lf in sorted({s["layout_file"] for s in prep["scenes"]}):
-        h.update(b"\0layout\0")
-        h.update(_file_sha(os.path.join(TEMPLATE_DIR, lf)).encode("ascii"))
-    h.update(b"\0motion\0" + (b"on" if motion_enabled else b"off"))
-    return h.hexdigest()
-
-
-def preview_reusable(preview_dir, stamp, n_scenes):
-    """本目录的预览产物可供本次成片复用（#26）。要求印记 schema/token/指纹
-    全部匹配 + 截图齐全 + 报告确为干净通过——历史 run、他 run 或失败报告
-    一律不沿用。"""
-    old = ra.read_preview_stamp(preview_dir)
-    if not old or old.get("schema") != ra.PREVIEW_STAMP_SCHEMA:
-        return False
-    if old.get("token") != stamp["token"] or old.get("digest") != stamp["digest"]:
-        return False
-    for i in range(n_scenes):
-        if not os.path.isfile(os.path.join(preview_dir, f"s{i}.png")):
-            return False
-    report_path = os.path.join(preview_dir, "overflow.json")
-    if not os.path.isfile(report_path):
-        return False
-    with open(report_path, encoding="utf-8") as f:
-        report = json.load(f)
-    if len(report) != n_scenes:
-        return False
-    return not any(e.get("findings") or e.get("placeholder_errs") for e in report)
-
-
 def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir):
     """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。
 
@@ -801,7 +719,7 @@ def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_
             for item in r["findings"]:
                 print(f" - scene {r['i']} ({r['kind']}) {item['sel']}: {item['msg']}")
         return 1
-    print(f"   PREVIEW OK  {len(report)} 页")
+    print(f"   PREVIEW_OK {len(report)} 页")
     return 0
 
 

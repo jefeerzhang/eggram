@@ -19,14 +19,10 @@ style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker �
 --style/--no-motion 以精确重定位本次运行。
 输出目标（#23）：省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`
 （皮肤名被规范化改写时追加短指纹防重合），同分镜多皮肤并行各得一个成片；
-显式 output 永远优先。活动运行竞争同一目标时，后启动者在 TTS/MP4 写入前
-被拒（FAIL_AT_PREFLIGHT + 占用诊断）；目标锁 `<output>.lock` 心跳保活，
-成功/失败/崩溃都释放，进程死亡后锁过期可接管，历史成片不删除。
-预览去重（#26）：每次 worker 运行生成唯一 token，Step 2 预览连同输入指纹
-（分镜/style/layout 字节 + motion 开关）写入 run 目录 stamp.json，Step 3 在
-「同 token + 同指纹」时复用该预览（steps 行记 PREVIEW_REUSED）——整个 worker
-只截一次图；分镜/style/layout 任一变化指纹即变、重新预验，绝不以旧成功结果
-渲染新输入；直接渲染不传 token，总是自行预览。
+显式 output 永远优先，指向同一目标的后启动者覆盖先写者。历史成片不删除。
+预览去重：Step 2 直接跑 `make_video.py --preview` 截图并验溢出，Step 3 传
+`--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关）
+的产物——整个 worker 只截一次图，输入一变 run_key 即变、落到新目录自行预览。
 """
 
 import argparse
@@ -34,7 +30,6 @@ import json
 import os
 import subprocess
 import sys
-import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -126,17 +121,7 @@ def main():
             style_name = "teaching"  # 缺/坏分镜由 preflight 报错，此处仅兜底命名
     out = args.output or ra.default_output_name(slug, style_name)
 
-    # 目标占用（#23）：TTS / MP4 写入前拒绝后启动者；成功、失败、崩溃都释放
-    try:
-        lock = ra.acquire_target(out, storyboard=sb, style_name=style_name)
-    except ra.TargetOccupied as e:
-        emit("FAIL_AT_PREFLIGHT", diagnostic=str(e))
-        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
-
-    try:
-        _pipeline(args, sb, out, style_name)
-    finally:
-        lock.release()
+    _pipeline(args, sb, out, style_name)
 
 
 def _cache_facts(sb, style_name, no_motion):
@@ -162,9 +147,6 @@ def _cache_facts(sb, style_name, no_motion):
 
 
 def _pipeline(args, sb, out, style_name):
-    # #26：本次 worker 运行唯一 token——Step 2 的预览结果只供同 token 的 Step 3
-    # 复用，历史成功结果与另一 run 的预览一律不沿用；直接渲染无 token，总自行预览
-    token = uuid.uuid4().hex[:12]
     # Step 1 preflight（含浏览器时点检查；exit 3 语义已在其中处理）
     rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
@@ -177,21 +159,23 @@ def _pipeline(args, sb, out, style_name):
     # Step 2 preview：独立跑只为错误分类（全渲内部本有预览闸门）。
     # 预览/音轨目录由 run_key 决定（#22）：分镜字节+style+motion 开关不同即隔离，
     # 无需 worker 再自算 --preview-dir；raw 旁白缓存与 style 无关，共享安全（#18）。
-    # Step 3 以同 token 复用本次预览（#26）：整个 worker 只截一次图
-    render_options = ["--preview-token", token]
+    common_options = []
     if args.style:
-        render_options += ["--style", args.style]
+        common_options += ["--style", args.style]
     if args.no_motion:
-        render_options.append("--no-motion")
+        common_options.append("--no-motion")
     if args.browser:
-        render_options += ["--browser", args.browser]
-    rc, log2 = run_script(["scripts/worker_preview.py", sb] + render_options)
+        common_options += ["--browser", args.browser]
+    rc, log2 = run_script(
+        ["scripts/make_video.py", sb, out, "--preview"] + common_options
+    )
     if rc != 0:
-        emit("FAIL_AT_PREVIEW", diagnostic=f"[worker exit {rc}]\n{tail(log2, 50)}")
+        emit("FAIL_AT_PREVIEW", diagnostic=f"[make_video exit {rc}]\n{tail(log2, 50)}")
         sys.exit(wr.STAGE_EXITS["PREVIEW"])
 
-    # Step 3 render：只调 CLI，不改其行为
-    cmd = ["scripts/make_video.py", sb, out] + render_options
+    # Step 3 render：只调 CLI，不改其行为。--skip-preview 复用 Step 2 同 run_key
+    # 目录下刚验过的预览，整个 worker 只截一次图
+    cmd = ["scripts/make_video.py", sb, out, "--skip-preview"] + common_options
     if args.reuse_audio:
         cmd.append("--reuse-audio")
     rc, log3 = run_script(cmd)
@@ -241,8 +225,6 @@ def _pipeline(args, sb, out, style_name):
         pick(log3, "DONE"),
         pick(log4, "VERIFY_OK"),
     ]
-    if "PREVIEW REUSED" in log3:  # #26：Step 3 复用 Step 2 预览的执行痕迹
-        parts.insert(2, "PREVIEW_REUSED")
     steps = " | ".join(parts)
     emit("OK", artifact=out, verify=f"[{marks}]", steps=steps, cache=cache)
 

@@ -89,7 +89,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 2. 填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。  
    **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 3.0`；正文是教学内容（色值/字号只在 style）。  
    **body 换行规则：** 用 `<br>` 表示换行（如 `"body": "第一行<br>第二行"`），**严禁用 `\n`**——`\n` 会被原样显示为文本而非换行。  
-   **图解（diagram）规则：** `kind: "diagram"` 页面通过 `chart` 对象声明式调用图表预设（`preset: "curve"` / `"quadrant"` / `"timeline"`），详见 [`scripts/charts.py`](scripts/charts.py)。  
+   **图解（diagram）规则：** `kind: "diagram"` 页面通过 `chart` 对象声明式调用图表预设（`preset: "curve"`），详见 [`scripts/charts.py`](scripts/charts.py)。  
    **排版变体：** 同一 kind 支持多种排版变体，通过 `layout_variant` 字段选择（如 rule 的 `"side"` 左规则右示例 / `"formula"` 上公式下拆解），详见 [`docs/json-schema.md`](docs/json-schema.md)。  
    **动效序列化：** `motion` 支持字符串（如 `"focus"`）或 effects 数组（如 `[{"type":"focus","delay":0},{"type":"pulse","delay":0.5}]`），详见 [`docs/motion.md`](docs/motion.md)。
 3. 选定 `voice` 与 `style`（换皮见 [`docs/styles.md`](docs/styles.md)）。  
@@ -101,7 +101,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 ## 阶段 2 — 渲视频
 
-> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 的预览带输入指纹（分镜/style/layout 字节 + motion 开关）印记，Step 3 成片同 run 复用（steps 行记 `PREVIEW_REUSED`）；分镜/style/layout 任一变化即重新预验，直接渲染不参与去重、总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先；同一目标的活动运行会在配音前被拒（FAIL_AT_PREFLIGHT + 占用诊断），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
+> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 跑 `make_video.py --preview` 截图并验溢出，Step 3 传 `--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关）的产物；直接渲染不传 `--skip-preview`，总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先（指向同一目标的后启动者覆盖先写者），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
 
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
@@ -140,7 +140,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | *公式渲染* / 结构化 formula | [`docs/formulas.md`](docs/formulas.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
 | CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
-| 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight/preview/verify.py`；产物归属与输出目标占用 `scripts/run_artifacts.py`（run 目录：preview+加工音轨+manifest；自动命名+`<output>.lock`）；契约 `.scratch/render-worker/` |
+| 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight.py` / `worker_verify.py`（Step 2 预览直接跑 `make_video.py --preview`）；产物归属 `scripts/run_artifacts.py`（run 目录：preview+加工音轨+manifest；缺省成片自动命名）；契约 `.scratch/render-worker/` |
 | 闸门规则 / 教学文本转义 | `scripts/storyboard_gate.py`（`prepare_storyboard` / `validate_storyboard` / `validate_layouts`）+ `templates/layout-*.html`；`make_video.py` re-export 兼容 |
 | 独立校验（不跑 TTS） | `py scripts/validate_storyboard.py <分镜.json>`（与渲染同一闸门，exit 2 = 失败） |
 | 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |

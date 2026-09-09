@@ -80,11 +80,7 @@
 }
 ```
 
-| 预设 | 用途 | 必填字段 |
-| --- | --- | --- |
-| `curve` | 坐标曲线（经济/数学） | axes, range, curve (points 或 fn), highlights |
-| `quadrant` | 四象限矩阵 | axes, labels |
-| `timeline` | 时间轴 | events |
+唯一预设 `curve`（坐标曲线，用于经济/数学图解），必填字段见上方示例。`preset` 为其它值时 `__CHART__` 留空。
 
 颜色 token：`__ACCENT__` / `__WRONG__` / `__CORRECT__` 自动映射到当前 skin 色值。  
 详见 [`scripts/charts.py`](../scripts/charts.py)。

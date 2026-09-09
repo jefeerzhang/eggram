@@ -843,14 +843,6 @@ def test_browser_side_example_has_distinct_escaped_columns(browser):
 
 
 @pytest.mark.parametrize(
-    "chart",
-    [
-        {"preset": "timeline", "events": [{"year": "2020", "label": "Start"}]},
-        {"preset": "quadrant", "labels": [{"label": "A", "desc": "Detail"}]},
-        {"preset": "curve", "highlights": [{"x": 1, "y": 50, "label": "A"}]},
-    ],
-)
-@pytest.mark.parametrize(
     "motion_enabled,scene_motion",
     [
         (False, "focus"),
@@ -859,13 +851,13 @@ def test_browser_side_example_has_distinct_escaped_columns(browser):
     ],
 )
 def test_browser_static_diagram_first_frame_is_complete(
-    browser, chart, motion_enabled, scene_motion
+    browser, motion_enabled, scene_motion
 ):
     sc = {
         "kind": "diagram",
         "header": "Diagram",
         "body": "B",
-        "chart": chart,
+        "chart": {"preset": "curve", "highlights": [{"x": 1, "y": 50, "label": "A"}]},
         "motion": scene_motion,
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
@@ -892,7 +884,7 @@ def test_browser_animated_diagram_still_has_animations(browser):
         "kind": "diagram",
         "header": "Diagram",
         "body": "B",
-        "chart": {"preset": "timeline", "events": [{"year": "2020", "label": "Start"}]},
+        "chart": {"preset": "curve", "highlights": [{"x": 2, "y": 40, "label": "B"}]},
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
