@@ -806,8 +806,8 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
     """
     style_name = style_name or tpl.get("style", "teaching")
     style = load_style(style_name)
-    W = int(tpl.get("width", 1920))
-    H = int(tpl.get("height", 1080))
+    W = int(tpl.get("width", 1280))
+    H = int(tpl.get("height", 720))
     fps_raw = tpl.get("fps", 30)
     if motion_enabled is None:
         motion_enabled = tpl.get("motion", True) is not False

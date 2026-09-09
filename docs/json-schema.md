@@ -12,8 +12,7 @@
 | style | | `teaching` / `classroom` / `explainer`；CLI `--style` 可覆盖 |
 | motion | | 顶层 bool，默认 true |
 | fps | | 正整数，默认 30（0、负数、布尔、非整数 → *闸门* 拒绝） |
-| width / height | | 默认 1920×1080（#27 起升级；显式传值优先） |
-| blocks | | 顶层 bool，默认 true——title/rule/mistake 页整页换肤为 hyperframes 动画 block（[`templates/blocks/README.md`](../templates/blocks/README.md)）；`false` 整支走静态布局 |
+| width / height | | 默认 1280×720 |
 | scenes | ✅ | 分镜数组 |
 
 ## scenes[]

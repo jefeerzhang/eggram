@@ -111,8 +111,6 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 
 默认输出 `output/<json 主名>.mp4`。`--style` 覆盖换皮；`--reuse-audio` 按课目录 + 旁白/音色指纹复用 raw（[`docs/audio.md`](docs/audio.md)）；`--preview` 只出缩略图与溢出报告；动效见 [`docs/motion.md`](docs/motion.md)。
 
-默认 1080p（1920×1080）。`title` / `rule` / `mistake` 页默认整页换肤为 hyperframes 动画 block（be 动词重击 / 规则聚焦 / 错误占比 race，[`templates/blocks/README.md`](templates/blocks/README.md)）；分镜顶层 `"blocks": false` 关闭；block 初始化失败自动回退该页静态布局，不影响出片。
-
 管线：二次 *闸门* → **预览截图/溢出**（未过则停）→ TTS/`prepare_scene_audio` → 时长核验 → motion 截帧 → ffmpeg。`--preview` 在预览后退出。
 
 环境：Python 3.11+；Windows 用户须用 `py` 启动器（`python` 在 WindowsApps 桩上静默 exit 49、零输出），macOS/Linux 用 `python3`；playwright + imageio_ffmpeg + numpy；本机 Chrome/Edge；环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`）。

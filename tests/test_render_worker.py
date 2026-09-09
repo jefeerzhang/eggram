@@ -122,8 +122,6 @@ def test_rendered_delayed_zoom_uses_video_seconds_and_freezes_during_hold(tts_ur
         ), encoding="utf-8")
         tpl = {
             "title": "Timing", "voice": "mimo_default", "fps": 2,
-            "width": 1280, "height": 720,  # 帧像素断言按 720p 写死
-            "blocks": False,  # 本用例测静态布局的动效时序（rule 页不被 block 换肤）
             "scenes": [
                 {"kind": kind, "header": "H", "body": "**B**", "narrate": "N", "motion": "none"}
                 for kind in ("title", "rule", "example", "practice", "answer", "summary")
@@ -171,15 +169,11 @@ def _copy_project(tmp):
 
 
 def _write_source_storyboard(project, sub, narrate, hold=0.0):
-    """完整教学弧（闸门要求 6 个必要 kind）；变量 hold 放 scene 0（title）。
-    钉 720p 且关 block：这批用例测与视觉无关的归属/失败分类，保持静态布局
-    的确定性（block 行为由 #27 专属用例覆盖）。"""
+    """完整教学弧（闸门要求 6 个必要 kind）；变量 hold 放 scene 0（title）。"""
     d = project / "cases" / sub
     d.mkdir(parents=True, exist_ok=True)
     tpl = {
         "title": "T", "voice": "mimo_default", "fps": 2,
-        "width": 1280, "height": 720,
-        "blocks": False,
         "scenes": [
             {"kind": kind, "header": "H", "body": "**B**", "narrate": narrate}
             for kind in ("title", "rule", "example", "practice", "answer", "summary")
@@ -761,166 +755,3 @@ def test_worker_stale_lock_recovered(tts_url):
         assert "已失效" in r.stderr  # 接管有可验证的说明
         assert not lockfile.exists()  # 正常结束释放的是本次自己的锁
         assert (outdir / "x.mp4").stat().st_size > 1000
-
-
-# ---- #27 动画 block 整页换肤（hyperframes Path A）----
-
-
-def _cdn_reachable():
-    import urllib.request
-
-    try:
-        urllib.request.urlopen(
-            "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js", timeout=5
-        )
-        return True
-    except OSError:
-        return False
-
-
-def test_block_lookup_and_switch():
-    from make_video import block_for_kind, blocks_enabled
-
-    assert block_for_kind("title")[0] == "beat-freeze-cut.html"
-    assert block_for_kind("rule")[0] == "cinematic-zoom.html"
-    assert block_for_kind("mistake")[0] == "bar-chart-race.html"
-    for kind in ("example", "practice", "answer", "summary", "diagram", None):
-        assert block_for_kind(kind) is None
-    assert blocks_enabled({}) is True  # 默认开启
-    assert blocks_enabled({"blocks": True}) is True
-    assert blocks_enabled({"blocks": False}) is False  # 分镜级关闭
-
-
-def test_block_smoke_timelines_initialize():
-    """blocks/_smoke.py：3 个 block 的 GSAP timeline 在 headless 下初始化成功。"""
-    if not find_browser():
-        pytest.skip("no Chrome/Edge available")
-    if not _cdn_reachable():
-        pytest.skip("blocks CDN (jsdelivr) unreachable")
-    r = subprocess.run(
-        [sys.executable, "templates/blocks/_smoke.py"],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120,
-    )
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert r.stdout.count("[PASS]") == 3, r.stdout
-
-
-def _write_block_storyboard(project, sub):
-    """默认 1080p（不写 width/height），title/rule/mistake 会被 block 换肤。"""
-    d = project / "cases" / sub
-    d.mkdir(parents=True, exist_ok=True)
-    tpl = {
-        "title": "现在进行时", "voice": "mimo_default", "fps": 2,
-        "scenes": [
-            {"kind": "title", "header": "现在进行时", "sub": "be + V-ing",
-             "body": "**现在进行时**", "narrate": "N"},
-            {"kind": "rule", "header": "核心规则", "sub": "结构",
-             "body": "be (am/is/are) + **V-ing**", "narrate": "N"},
-            {"kind": "example", "header": "例句", "sub": "S",
-             "body": "I am **running**", "narrate": "N"},
-            {"kind": "mistake", "header": "常见错误", "sub": "占比",
-             "body": "He go **to school**", "zh": "Z", "narrate": "N"},
-            {"kind": "practice", "header": "练习", "sub": "S",
-             "body": "She **is** run", "think": "T", "narrate": "N", "hold": 3},
-            {"kind": "answer", "header": "答案", "sub": "S",
-             "body": "She **is running**", "narrate": "N"},
-            {"kind": "summary", "header": "S", "sub": "next",
-             "body": "**be + V-ing**", "narrate": "N"},
-        ],
-    }
-    (d / "lesson.json").write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
-
-
-@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_blocks_render_pages_and_1080p(tts_url):
-    """block 页整页换肤并进成片：preview/成片日志、manifest 记录、1080p 分辨率。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    if not _cdn_reachable():
-        pytest.skip("blocks CDN (jsdelivr) unreachable")
-    with tempfile.TemporaryDirectory(prefix="mv_blk_") as tmp:
-        project = _copy_project(tmp)
-        _write_block_storyboard(project, "a")
-        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
-        r = subprocess.run(
-            [sys.executable, "scripts/make_video.py", "cases/a/lesson.json", "out/blk.mp4"],
-            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=300,
-        )
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "[title/block:beat-freeze-cut]" in r.stdout
-        assert "[rule/block:cinematic-zoom]" in r.stdout
-        assert "[mistake/block:bar-chart-race]" in r.stdout
-        runs = project / "_build" / "runs"
-        manifest = json.loads(
-            (runs / sorted(p.name for p in runs.iterdir())[0] / "manifest.json").read_text(encoding="utf-8")
-        )
-        assert (manifest["W"], manifest["H"]) == (1920, 1080)
-        blocks = [s["block"] for s in manifest["scenes"]]
-        assert blocks == [
-            "beat-freeze-cut", "cinematic-zoom", None,
-            "bar-chart-race", None, None, None,
-        ]
-        assert (project / "out/blk.mp4").stat().st_size > 1000
-        # 六项验收对 block 成片照常工作（读 manifest 真实音轨）
-        v = subprocess.run(
-            [sys.executable, "scripts/worker_verify.py", "cases/a/lesson.json", "out/blk.mp4",
-             "--expect-reuse-audio"],
-            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
-        )
-        assert v.returncode == 0, v.stdout + v.stderr
-
-
-def test_blocks_disabled_renders_static():
-    """顶层 "blocks": false → 整支走静态布局，无 block 换肤。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_blkoff_") as tmp:
-        project = _copy_project(tmp)
-        _write_block_storyboard(project, "a")
-        sb = project / "cases/a/lesson.json"
-        tpl = json.loads(sb.read_text(encoding="utf-8"))
-        tpl["blocks"] = False
-        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
-        env = dict(os.environ, MIMO_API_KEY="local-test", PYTHONUTF8="1")
-        r = subprocess.run(
-            [sys.executable, "scripts/make_video.py", "cases/a/lesson.json", "--preview"],
-            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
-        )
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "block:" not in r.stdout
-        assert "PREVIEW OK" in r.stdout
-
-
-@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
-def test_block_init_failure_falls_back_to_static(tts_url):
-    """block 初始化失败（GSAP 加载不到）→ 该页回退静态布局，整支视频照常出片。"""
-    browser = find_browser()
-    if not browser:
-        pytest.skip("no Chrome/Edge available")
-    with tempfile.TemporaryDirectory(prefix="mv_blkfb_") as tmp:
-        project = _copy_project(tmp)
-        _write_block_storyboard(project, "a")
-        bf = project / "templates/blocks/beat-freeze-cut.html"
-        bf.write_text(
-            bf.read_text(encoding="utf-8").replace(
-                '<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>',
-                "",
-            ),
-            encoding="utf-8",
-        )
-        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
-        r = subprocess.run(
-            [sys.executable, "scripts/make_video.py", "cases/a/lesson.json", "out/blk.mp4"],
-            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=300,
-        )
-        assert r.returncode == 0, r.stdout + r.stderr
-        assert "初始化失败" in r.stderr  # 回退有可验证的 warning
-        runs = project / "_build" / "runs"
-        manifest = json.loads(
-            (runs / sorted(p.name for p in runs.iterdir())[0] / "manifest.json").read_text(encoding="utf-8")
-        )
-        assert manifest["scenes"][0]["block"] is None  # title 回退静态
-        assert manifest["scenes"][1]["block"] == "cinematic-zoom"  # 其他 block 不受影响
-        assert (project / "out/blk.mp4").stat().st_size > 1000
