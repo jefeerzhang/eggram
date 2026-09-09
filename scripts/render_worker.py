@@ -1,12 +1,16 @@
-"""render_worker.py — 渲染 worker 单一入口（GitHub issue #10）
+"""render_worker.py — 渲染 worker 单一入口（GitHub issue #10，#25 统一失败分类）
 
 用法: py scripts/render_worker.py examples/<slug>.json [output.mp4]
       (--reuse-audio | --no-reuse-audio) [--style NAME] [--no-motion] [--browser PATH]
 
-5 步固定流水线：preflight → preview → render → verify → 回传。
-退出码：0=OK 1=PREFLIGHT 2=PREVIEW 3=RENDER 4=VERIFY（含用法错误=1）。
+5 步固定流水线：preflight → preview → render → verify → 回传；前序失败即短路，
+后续阶段不执行。退出码映射见 scripts/worker_result.py（0=OK 1=PREFLIGHT
+2=PREVIEW 3=RENDER 4=VERIFY，含用法错误=1）。
 stdout 末段为固定四字段回传：status / artifact / verify / diagnostic；
-OK 路径另加一行 `steps:`（#19：各步执行痕迹，字段只增不改，失败路径行为不变）。
+OK 路径另加一行 `steps:`（#19：各步执行痕迹）。
+verify 勾选串六格图例：✓ 通过、✗ 失败、- 显式跳过、· 因前序失败/未执行；
+由 worker_verify 的 `CHECK <n> <STATE>` 协议行（空白分词）与本 worker 自己实测的
+Step 1/2 结果合成（#25），不解析日志字符位置，未检查项绝不填通过。
 产物归属（#22）：preview 与加工音轨按 run 目录隔离（run_key = 分镜字节 +
 style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker 并行互踩
 不再可能；raw 旁白仍共享 `_build/<slug>/`（换皮复用）。verify 传相同的
@@ -19,6 +23,9 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+
+import worker_result as wr  # noqa: E402
 
 
 class Parser(argparse.ArgumentParser):
@@ -81,7 +88,7 @@ def main():
             diagnostic="必须显式选择 --reuse-audio 或 "
             "--no-reuse-audio（保护 MIMO_API_KEY 配额，不允许隐式默认）",
         )
-        sys.exit(1)
+        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
     if args.no_reuse_audio:
         print(
             "WARN: --no-reuse-audio 逃生口已启用，全部旁白将重跑 TTS", file=sys.stderr
@@ -98,7 +105,7 @@ def main():
     )
     if rc != 0:
         emit("FAIL_AT_PREFLIGHT", diagnostic=tail(log1, 50))
-        sys.exit(1)
+        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
 
     # Step 2 preview：独立跑只为错误分类（全渲内部本有预览闸门）。
     # 预览/音轨目录由 run_key 决定（#22）：分镜字节+style+motion 开关不同即隔离，
@@ -113,7 +120,7 @@ def main():
     rc, log2 = run_script(["scripts/worker_preview.py", sb] + render_options)
     if rc != 0:
         emit("FAIL_AT_PREVIEW", diagnostic=f"[worker exit {rc}]\n{tail(log2, 50)}")
-        sys.exit(2)
+        sys.exit(wr.STAGE_EXITS["PREVIEW"])
 
     # Step 3 render：只调 CLI，不改其行为
     cmd = ["scripts/make_video.py", sb, out] + render_options
@@ -125,7 +132,7 @@ def main():
             "FAIL_AT_PREFLIGHT",
             diagnostic=f"render 中 make_video exit 3（浏览器缺失）\n{tail(log3, 100)}",
         )
-        sys.exit(1)
+        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
     if rc != 0:
         art = out if os.path.isfile(os.path.join(ROOT, out)) else None
         emit(
@@ -133,9 +140,11 @@ def main():
             artifact=art,
             diagnostic=f"make_video.py exit {rc}\n{tail(log3, 100)}",
         )
-        sys.exit(3)
+        sys.exit(wr.STAGE_EXITS["RENDER"])
 
-    # Step 4 verify：传与渲染相同的 --style/--no-motion，精确重定位本次 run（#22）
+    # Step 4 verify：传与渲染相同的 --style/--no-motion，精确重定位本次 run（#22）。
+    # 勾选串由 CHECK 协议行合成（#25）：1/2 用本 worker 实测的 Step 1/2 结果，
+    # 3-6 用 verify 报告的终态；verify 崩溃时 3-6 如实记未执行，不填通过或失败
     cmd = ["scripts/worker_verify.py", sb, out]
     if args.style:
         cmd.append("--style")
@@ -145,22 +154,14 @@ def main():
     if args.reuse_audio:
         cmd.append("--expect-reuse-audio")
     rc, log4 = run_script(cmd)
+    marks = wr.marks_line((wr.PASS, wr.PASS), wr.parse_check_lines(log4))
     if rc != 0:
-        marks = ["✓"] * 6
-        item = 0
-        for line in log4.splitlines():
-            if line.startswith("verify FAIL ["):
-                item = int(line[13])
-                if 1 <= item <= len(marks):
-                    marks[item - 1] = "✗"
-        if not item:  # worker_verify 崩溃等未预期失败，标后三项存疑
-            marks[2:] = ["✗"] * (len(marks) - 2)
         emit(
             "FAIL_AT_VERIFY",
-            verify="[" + "".join(marks) + "]",
+            verify=f"[{marks}]",
             diagnostic=tail(log4, 50),
         )
-        sys.exit(4)
+        sys.exit(wr.STAGE_EXITS["VERIFY"])
 
     # Step 5 回传（steps 行给出各步执行痕迹，防"OK 但没真跑"质疑）
     steps = " | ".join(
@@ -171,7 +172,7 @@ def main():
             pick(log4, "VERIFY_OK"),
         ]
     )
-    emit("OK", artifact=out, verify="[✓✓✓✓✓✓]", steps=steps)
+    emit("OK", artifact=out, verify=f"[{marks}]", steps=steps)
 
 
 if __name__ == "__main__":

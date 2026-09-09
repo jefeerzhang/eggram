@@ -5,6 +5,7 @@ import io
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import subprocess
@@ -283,3 +284,168 @@ def test_skin_rerender_reuses_raw_not_processed_audio(tts_url):
         assert "reuse-confirmed" in r.stdout
         runs = sorted(p.name for p in (project / "_build" / "runs").iterdir())
         assert len(runs) == 2 and any("classroom" in n for n in runs) and any("teaching" in n for n in runs), runs
+
+
+# ---- #25 失败分类与六项验收回传：各阶段失败路径（CLI + 可替换依赖）----
+
+
+@contextmanager
+def local_tts(status=200):
+    """本地 TTS stand-in，计数收到的 POST；status!=200 时一律回该状态码。"""
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(b"\0\0" * 24000)
+    payload = json.dumps({"choices": [{"message": {"audio": {
+        "data": base64.b64encode(audio.getvalue()).decode("ascii"),
+    }}}]}).encode()
+    counter = {"post": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            counter["post"] += 1
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload) if status == 200 else 0))
+            self.end_headers()
+            if status == 200:
+                self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}/tts", counter
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def test_worker_usage_error_is_preflight_failure():
+    with tempfile.TemporaryDirectory(prefix="mv_fail_use_") as tmp:
+        project = _copy_project(tmp)
+        r = _run_worker(project, dict(os.environ, PYTHONUTF8="1"), "x.json", "out/x.mp4")
+    assert r.returncode == 1
+    assert "status: FAIL_AT_PREFLIGHT" in r.stdout
+    assert "必须显式选择 --reuse-audio" in r.stdout
+
+
+def test_worker_missing_storyboard_fails_at_preflight_with_four_fields():
+    with tempfile.TemporaryDirectory(prefix="mv_fail_pre_") as tmp:
+        project = _copy_project(tmp)
+        env = dict(os.environ, MIMO_API_KEY="local-test", PYTHONUTF8="1")
+        r = _run_worker(project, env, "cases/none/lesson.json", "out/x.mp4", "--reuse-audio")
+    assert r.returncode == 1
+    assert "status: FAIL_AT_PREFLIGHT" in r.stdout
+    for field in ("artifact: (none)", "verify: (none)", "diagnostic:"):
+        assert field in r.stdout
+    assert "分镜 JSON 不存在" in r.stdout
+
+
+def test_worker_missing_browser_maps_to_preflight():
+    with tempfile.TemporaryDirectory(prefix="mv_fail_br_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Browser missing.", 0.0)
+        env = dict(os.environ, MIMO_API_KEY="local-test", PYTHONUTF8="1",
+                   MIMO_API_URL="http://127.0.0.1:9/tts")
+        r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4",
+                        "--reuse-audio", "--browser", "Z:/no/browser.exe")
+    assert r.returncode == 1
+    assert "status: FAIL_AT_PREFLIGHT" in r.stdout
+    assert "指定浏览器不存在" in r.stdout
+
+
+def test_worker_preview_failure_runs_zero_tts_requests():
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_fail_pv_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Overflow narration.", 0.0)
+        sb = project / "cases/a/lesson.json"
+        tpl = json.loads(sb.read_text(encoding="utf-8"))
+        tpl["scenes"][1]["body"] = "<br>".join(["A = B + C"] * 24)  # rule 正文溢出
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+        with local_tts() as (url, counter):
+            env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=url, PYTHONUTF8="1")
+            r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert r.returncode == 2
+        assert "status: FAIL_AT_PREVIEW" in r.stdout
+        assert "verify: (none)" in r.stdout
+        assert counter["post"] == 0  # 预览失败零 TTS 请求
+
+
+def test_worker_tts_failure_reports_render_stage():
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_fail_rd_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Render fail.", 0.0)
+        with local_tts(status=500) as (url, counter):
+            env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=url, PYTHONUTF8="1")
+            r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert counter["post"] > 0  # 确实走到了 render 的 TTS
+        assert r.returncode == 3
+        assert "status: FAIL_AT_RENDER" in r.stdout
+        assert "make_video.py exit" in r.stdout
+
+
+def test_worker_verify_failure_marks_failed_and_unexecuted(tts_url):
+    """预览拦不到的分镜级残留（rule 页 wrong_body 不进渲染 HTML）→ 检查 6 红。"""
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_fail_vf_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Verify check6.", 0.0)
+        sb = project / "cases/a/lesson.json"
+        tpl = json.loads(sb.read_text(encoding="utf-8"))
+        tpl["scenes"][1]["wrong_body"] = "line1\\nline2"
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--no-reuse-audio")
+        assert r.returncode == 4, r.stdout + r.stderr
+        assert "status: FAIL_AT_VERIFY" in r.stdout
+        assert "verify: [✓✓✓✓-✗]" in r.stdout  # 5 显式跳过、6 失败，未执行不填通过
+        assert "CHECK 6 FAIL" in r.stdout
+        assert "verify FAIL [6]" in r.stdout
+
+
+@pytest.mark.parametrize("tts_url", [0.2], indirect=True)
+def test_worker_success_and_standalone_verify_marks_are_honest(tts_url):
+    browser = find_browser()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    with tempfile.TemporaryDirectory(prefix="mv_ok_marks_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Marks narration.", 0.0)
+        env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
+        r = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "verify: [✓✓✓✓✓✓]" in r.stdout  # 全部实测通过才可全勾
+        steps = next(line for line in r.stdout.splitlines() if line.startswith("steps:"))
+        for token in ("PREFLIGHT_OK", "PREVIEW_OK", "DONE", "VERIFY_OK"):
+            assert token in steps
+        # 单独验收：1/2 没跑过 → 如实记 ·，5 未要求 → 显式跳过 -
+        v1 = subprocess.run(
+            [sys.executable, "scripts/worker_verify.py", "cases/a/lesson.json", "out/x.mp4"],
+            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        assert v1.returncode == 0, v1.stdout + v1.stderr
+        assert "VERIFY_OK [··✓✓-✓]" in v1.stdout
+        assert "CHECK 1 PASS" not in v1.stdout  # 不声称未执行的前置检查
+        v2 = subprocess.run(
+            [sys.executable, "scripts/worker_verify.py", "cases/a/lesson.json", "out/x.mp4",
+             "--style", "teaching", "--expect-reuse-audio"],
+            cwd=project, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        assert v2.returncode == 0, v2.stdout + v2.stderr
+        assert "VERIFY_OK [··✓✓✓✓]" in v2.stdout
+        assert "reuse-confirmed" in v2.stdout

@@ -122,7 +122,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 - 画面：教学内容、整页居中、易错/练习可扫区分
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）
 - 音频：`hold` 段为静音；段间接缝干净；成片时长 ≈ Σ(旁白+hold)（*音画锁*）
-- worker 模式：前两项由 5 项自动验收（`verify: [✓✓✓✓✓]`）替代人工勾选；画面内容/动效体感/音频接缝 3 项仍需人看
+- worker 模式：六项自动验收替代人工勾选（`verify: [✓✓✓✓-✓]`，条目与图例见 `scripts/worker_result.py`：✓ 通过、✗ 失败、- 显式跳过、· 因前序失败未执行；单独跑 `worker_verify.py` 时前两项如实记 `·`）；画面内容/动效体感/音频接缝 3 项仍需人看
 
 ---
 
