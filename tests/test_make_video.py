@@ -787,6 +787,64 @@ def test_chart_highlight_labels_stay_inside_viewbox():
         assert x + w <= 500, f"标签右缘 {x + w:.1f} 越出 viewBox 500"
 
 
+def _polyline_samples(svg, step=2.0):
+    """展开产物里曲线路径为稠密采样点。只取顶点会漏掉"线段穿角"的情况。"""
+    d = re.search(r"<path d='([^']+)'", svg).group(1)
+    verts = [(float(a), float(b)) for a, b in re.findall(r"(-?[\d.]+) (-?[\d.]+)", d)]
+    out = []
+    for (ax, ay), (bx, by) in zip(verts, verts[1:]):
+        n = max(1, int(abs(bx - ax) / step))
+        out.extend(
+            (ax + (bx - ax) * i / n, ay + (by - ay) * i / n) for i in range(n + 1)
+        )
+    return out or verts
+
+
+def _label_boxes(svg):
+    return [
+        (float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)))
+        for m in re.finditer(
+            r"<rect x='([-\d.]+)' y='([-\d.]+)' width='([-\d.]+)' height='([-\d.]+)'",
+            svg,
+        )
+    ]
+
+
+def test_chart_highlight_labels_do_not_cross_the_curve():
+    """charts.py docstring 承诺「标签永不压线，与曲线保持 6px 间隙」。
+    用产物自身的 path 与 rect 几何核对，不重述避让公式。
+    判定对象是曲线中心线（描边宽 5，中心线不入库时视觉上也留得下）。"""
+    chart = {
+        "preset": "curve",
+        "range": {"xmin": 0, "xmax": 5, "ymin": 0, "ymax": 100},
+        "curve": {
+            "width": 5,
+            "points": [
+                {"x": 0, "y": 100},
+                {"x": 1, "y": 72},
+                {"x": 3, "y": 42},
+                {"x": 5, "y": 2},
+            ],
+        },
+        "highlights": [
+            {"x": 5, "y": 2, "label": "MU→0 饱和见底"},
+            {"x": 0, "y": 100, "label": "起点很高"},
+            {"x": 3, "y": 42, "label": "中点"},
+        ],
+    }
+    svg = sg.resolve_chart(chart, sg.style_token_map(mv.load_style("teaching")))
+    samples = _polyline_samples(svg)
+    boxes = _label_boxes(svg)
+    assert len(boxes) == 3 and len(samples) > 40, (boxes, len(samples))
+    for rx, ry, rw, rh in boxes:
+        crossed = [
+            (round(x, 1), round(y, 1))
+            for x, y in samples
+            if rx <= x <= rx + rw and ry <= y <= ry + rh
+        ]
+        assert not crossed, f"标签盒 ({rx}, {ry}, {rw}x{rh}) 压住曲线，穿过点 {crossed[:3]}"
+
+
 # ---- 11 公式页分步动效时间线 ----
 
 
