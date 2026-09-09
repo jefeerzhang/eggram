@@ -321,6 +321,14 @@ def resolve_motion(sc, motion_enabled=True):
     raise ValueError(f"motion 格式错误: {m!r}（应为字符串或数组）")
 
 
+def resolve_motion_enabled(tpl, no_motion=False):
+    """本次渲染是否启动效：CLI 的 --no-motion 与分镜顶层 motion 开关合一，任一关即关。
+
+    三个入口（渲染 / worker / 验收）共用此判定，避免各抄一遍算式后走偏。
+    """
+    return (not no_motion) and tpl.get("motion", True) is not False
+
+
 def _motion_display_name(effects):
     """用于日志显示的动效名称。"""
     if len(effects) == 1:
@@ -1051,7 +1059,7 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
     H = int(tpl.get("height", 720))
     fps_raw = tpl.get("fps", 30)
     if motion_enabled is None:
-        motion_enabled = tpl.get("motion", True) is not False
+        motion_enabled = resolve_motion_enabled(tpl)
     scenes = tpl.get("scenes") or []
 
     errors, warnings = [], []

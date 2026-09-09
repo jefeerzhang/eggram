@@ -224,15 +224,16 @@ def test_verify_out_of_tolerance_fails_with_direction(project, ffmpeg):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def test_verify_missing_audio_fails_without_guessing(project, ffmpeg):
-    """无 manifest 且无旧版共享音轨 → 失败并给出定位指引，不猜目录。"""
+def test_verify_without_manifest_fails_without_guessing(project, ffmpeg):
+    """定位不到本次 run 的 manifest → 失败并给出查找到的 run 目录，不猜数据源。"""
     d = _mkdtemp("ra_verify_missing_")
     try:
         sb = _write_sb(os.path.join(d, "lesson.json"))
         mp4 = _make_mp4(ffmpeg, os.path.join(d, "a.mp4"), 1.0)
         r = _run_verify(project, sb, mp4)
         assert r.returncode == 4, r.stdout + r.stderr
-        assert "missing scene audio" in r.stderr
+        assert "lesson__teaching__" in r.stderr  # 说清找了哪个 run 目录
+        assert "--style" in r.stderr  # 给出可执行的纠正指引
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -243,11 +244,12 @@ def test_verify_wrong_style_flag_does_not_match_run(project, ffmpeg):
     try:
         sb = _write_sb(os.path.join(d, "lesson.json"))
         wav = _make_wav(os.path.join(d, "s0.wav"), 1.0)
-        _write_manifest_for(project, sb, wav, 1.0)
+        _write_manifest_for(project, sb, wav, 1.0)  # 写在 teaching 的 run 下
         mp4 = _make_mp4(ffmpeg, os.path.join(d, "a.mp4"), 1.0)
         r = _run_verify(project, sb, mp4, "--style", "classroom")  # 渲染是 teaching
         assert r.returncode == 4, r.stdout + r.stderr
-        assert "missing scene audio" in r.stderr
+        assert "lesson__classroom__" in r.stderr  # 查的是 classroom
+        assert wav not in r.stderr  # 没有回退去用 teaching 那份音轨
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import run_artifacts as ra  # noqa: E402
 import worker_result as wr  # noqa: E402
+from storyboard_gate import resolve_motion_enabled  # noqa: E402
 
 
 class Parser(argparse.ArgumentParser):
@@ -129,12 +130,10 @@ def _cache_facts(sb, style_name, no_motion):
     记录），不做事后数文件；旧产物/渲染未完成 → None。"""
     try:
         with open(sb, encoding="utf-8") as f:
-            motion_enabled = (not no_motion) and (json.load(f).get("motion", True) is not False)
+            motion_enabled = resolve_motion_enabled(json.load(f), no_motion)
     except (OSError, ValueError):
         return None
-    slug = os.path.splitext(os.path.basename(sb))[0]
-    rkey = ra.run_key(sb, style_name, motion_enabled)
-    manifest = ra.read_manifest(ra.run_dir(ROOT, slug, style_name, rkey))
+    manifest = ra.read_manifest(ra.locate_run(ROOT, sb, style_name, motion_enabled))
     if not manifest or manifest.get("schema") != ra.MANIFEST_SCHEMA:
         return None
     if "tts_generated" not in manifest:

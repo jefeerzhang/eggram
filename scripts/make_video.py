@@ -44,6 +44,7 @@ from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker
     render_html,
     resolve_kind,
     resolve_motion,
+    resolve_motion_enabled,
     resolve_voice,
     validate_layouts,
     validate_rendered_html,
@@ -305,7 +306,7 @@ def main():
     )
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
-    motion_enabled = (not args.no_motion) and (tpl.get("motion", True) is not False)
+    motion_enabled = resolve_motion_enabled(tpl, args.no_motion)
 
     print("0/4 校验布局与分镜...")
     prep = prepare_storyboard(tpl, style_name=args.style, motion_enabled=motion_enabled)
@@ -323,8 +324,7 @@ def main():
     # 单次运行产物归属（#22）：run 目录拥有本次 preview + 加工音轨 + manifest；
     # 可共享的 raw 旁白仍在 _build/<slug>/（旁白+音色指纹，style 不参与）
     slug = os.path.splitext(os.path.basename(tpl_path))[0]
-    rkey = ra.run_key(tpl_path, prep["style_name"], motion_enabled)
-    rdir = ra.run_dir(ROOT, slug, prep["style_name"], rkey)
+    rdir = ra.locate_run(ROOT, tpl_path, prep["style_name"], motion_enabled)
     print(
         f"   style={prep['style_name']} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
     )
@@ -368,8 +368,7 @@ def main():
     wavs, durs, frame_counts, narr_frames_list = [], [], [], []
     audio_out = ra.audio_dir(rdir)
     os.makedirs(audio_out, exist_ok=True)
-    lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
-    cache_dir = os.path.join(ROOT, "_build", lesson_key)
+    cache_dir = os.path.join(ROOT, "_build", slug)
     os.makedirs(cache_dir, exist_ok=True)
     scene_meta = []
     for i, sc in enumerate(scenes):
@@ -567,8 +566,6 @@ def main():
         rdir,
         {
             "schema": ra.MANIFEST_SCHEMA,
-            "run_key": rkey,
-            "slug": slug,
             "style_name": prep["style_name"],
             "motion_enabled": motion_enabled,
             "fps": FPS,
