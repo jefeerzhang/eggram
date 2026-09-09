@@ -240,17 +240,17 @@ def build_curve_svg(chart, colors):
         # 如果靠近顶部就放到下方
         if ly < 20:
             ly = hy + 22
-        # 如果靠右，标签左对齐；靠中则居中
-        anchor = "start" if hx > _PAD_L + _PX * 0.7 else "middle"
-        lx = hx + 10 if anchor == "start" else hx
+        # 标签盒以点为中心，再按盒宽把中心夹回画布内：靠边的点若继续外推会被裁掉
+        lw = len(label) * 7.5 + 8
+        lx = min(max(hx, lw / 2 + 4), _VW - lw / 2 - 4)
         parts.append(
-            f"<rect x='{lx - 4}' y='{ly - 11}' width='{len(label) * 7.5 + 8}' height='16' "
+            f"<rect x='{lx - lw / 2}' y='{ly - 11}' width='{lw}' height='16' "
             f"rx='3' fill='{surface}' class='stagger-item' "
             f"style='animation-delay:{delay:.1f}s'/>"
         )
         parts.append(
             _svg_text(
-                lx, ly, label, size=12, color=hl_color, anchor=anchor, weight="600"
+                lx, ly, label, size=12, color=hl_color, weight="600"
             ).replace(
                 "<text",
                 f"<text class='stagger-item' style='animation-delay:{delay:.1f}s'",
