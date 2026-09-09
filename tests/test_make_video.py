@@ -878,6 +878,9 @@ def test_browser_formula_vars_drive_computed_style(browser):
         assert p["bar"][0] == pytest.approx(1.0)
         assert p["steps"] == [pytest.approx(1.0), pytest.approx(0.45)]
         assert p["main"][0] == pytest.approx(1.0)
+        # 第二个 part 点亮（u=0.90）：讲过的 num 停在半亮，不再退回全暗
+        d = snapshot(0.90)
+        assert d["steps"] == [pytest.approx(0.725), pytest.approx(1.0)]
         # 主式阶段（u=0.25）：主式放大一档，parts 仍全暗
         m = snapshot(0.25)
         assert m["main"][0] > 1.0

@@ -513,8 +513,11 @@ def apply_motion_css_vars(page, scale, hl, glow, formula=None):
           b.style.setProperty('--m-frac-bar', f.frac_bar.toFixed(4));
           const active = f.active_part || '';
           b.style.setProperty('--m-formula-hl', active === '__main__' ? '1.04' : '1');
-          steps.forEach(el => el.style.setProperty(
-            '--m-part-on', el.getAttribute('data-part-id') === active ? '1' : '0'));
+          // 累积点亮：当前项全亮、讲过的停半亮、没讲到的暗；入场/主式无当前项 → 全暗。
+          // 三档取值经 MOTION_CSS 的 calc(0.45 + 0.55 * v) 映射成 1.0 / 0.725 / 0.45。
+          const cur = steps.findIndex(el => el.getAttribute('data-part-id') === active);
+          const level = j => (cur < 0 ? '0' : j < cur ? '0.5' : j === cur ? '1' : '0');
+          steps.forEach((el, j) => el.style.setProperty('--m-part-on', level(j)));
         }""",
         [round(scale, 4), round(hl, 4), round(glow, 4), formula],
     )
