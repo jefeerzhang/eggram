@@ -54,7 +54,7 @@
 
 `u = min(elapsed, duration) / duration`（duration>0）。
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 def test_formula_motion_vars_timeline_phases():
@@ -88,11 +88,11 @@ def test_formula_motion_vars_zero_duration():
     assert v["card_y"] == 8
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [x] **Step 2: Run — expect FAIL**
 
 `py -m pytest tests/test_make_video.py::test_formula_motion_vars_timeline_phases tests/test_make_video.py::test_formula_motion_vars_zero_duration -v`
 
-- [ ] **Step 3: Implement `formula_motion_vars`**
+- [x] **Step 3: Implement `formula_motion_vars`**
 
 ```python
 def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
@@ -137,8 +137,8 @@ def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
     }
 ```
 
-- [ ] **Step 4: Run — PASS**
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run — PASS**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/storyboard_gate.py tests/test_make_video.py scripts/make_video.py
@@ -163,7 +163,7 @@ git commit -m "feat(motion): 增加 formula_motion_vars 分步时间线"
   - `.step { opacity: calc(0.45 + 0.55 * var(--m-part-on, 1)) }` 经 JS 按 `data-part-id` 设 `--m-part-on`
   - `[data-formula-main]` 在 active=`__main__` 时用现有 `--m-hl` 或额外 class
 
-- [ ] **Step 1: Failing test — MOTION_CSS / layout 含钩子**
+- [x] **Step 1: Failing test — MOTION_CSS / layout 含钩子**
 
 ```python
 def test_formula_motion_css_hooks_present():
@@ -176,7 +176,7 @@ def test_formula_motion_css_hooks_present():
 
 （卡片样式可写在 MOTION_CSS 里用 `.formula-card` 选择器，layout 可不重复。）
 
-- [ ] **Step 2: Run FAIL → Step 3 implement**
+- [x] **Step 2: Run FAIL → Step 3 implement**
 
 `MOTION_CSS` 追加：
 
@@ -243,8 +243,8 @@ def apply_motion_css_vars(page, scale, hl, glow, formula=None):
 
 （入场 `active=""` 时 parts 全暗；主式时 parts 暗；匹配 id 时亮——与 §4「其它项略降透明」一致。）
 
-- [ ] **Step 4: 更新所有 `apply_motion_css_vars` 调用点** 保持兼容（`formula` 默认 None）
-- [ ] **Step 5: Commit**
+- [x] **Step 4: 更新所有 `apply_motion_css_vars` 调用点** 保持兼容（`formula` 默认 None）
+- [x] **Step 5: Commit**
 
 `feat(motion): 公式页 CSS 变量与 apply 接线`
 
@@ -260,7 +260,7 @@ def apply_motion_css_vars(page, scale, hl, glow, formula=None):
 - Helper: `formula_parts_for_motion(sc) -> list|None`  
   仅当 `resolve_kind(sc)=="rule"` 且 `layout_variant=="formula"` 且 `isinstance(formula, dict)` 且 `parts` 为 list 时返回 parts，否则 `None`
 
-- [ ] **Step 1: Test helper**
+- [x] **Step 1: Test helper**
 
 ```python
 def test_formula_parts_for_motion_only_on_formula_rule():
@@ -272,7 +272,7 @@ def test_formula_parts_for_motion_only_on_formula_rule():
     assert sg.formula_parts_for_motion({"kind": "rule", "body": "x"}) is None
 ```
 
-- [ ] **Step 2–3: Implement helper + wire render loop**
+- [x] **Step 2–3: Implement helper + wire render loop**
 
 在 `make_video.py` 逐帧处（现有 `apply_motion_css_vars(page, *frame_motion_state(...))`）：
 
@@ -296,7 +296,7 @@ apply_motion_css_vars(page, scale, hl, glow, fvars)
 
 Preview 溢出探测：保持现有；不必每态扫 formula 动效（YAGNI）。可选：探测时对 active 各 part 采一次——本 plan **不做**。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 `feat(renderer): 成片循环叠加公式分步动效`
 
@@ -306,10 +306,10 @@ Preview 溢出探测：保持现有；不必每态扫 formula 动效（YAGNI）�
 
 **Files:** `docs/motion.md`；可选 `docs/formulas.md` 一句链到 motion
 
-- [ ] **Step 1: `docs/motion.md` 增加「公式页默认时间线」表（入场 0–15% / 主式 15–40% / parts 均分）**
-- [ ] **Step 2: `py -m pytest tests/test_make_video.py -q`**
-- [ ] **Step 3: 手工 `--preview` 可选；有浏览器时对 `.scratch/formula_demo.json` 全渲抽 3 帧肉眼看（报告即可）**
-- [ ] **Step 4: Commit** `docs(motion): 说明公式页分步动效时间线`
+- [x] **Step 1: `docs/motion.md` 增加「公式页默认时间线」表（入场 0–15% / 主式 15–40% / parts 均分）**
+- [x] **Step 2: `py -m pytest tests/test_make_video.py -q`**
+- [x] **Step 3: 手工 `--preview` 可选；有浏览器时对 `.scratch/formula_demo.json` 全渲抽 3 帧肉眼看（报告即可）**
+- [x] **Step 4: Commit** `docs(motion): 说明公式页分步动效时间线`
 
 ---
 
@@ -329,3 +329,27 @@ Preview 溢出探测：保持现有；不必每态扫 formula 动效（YAGNI）�
 | hold 冻末态 | 1 + 3 |
 | 无新 JSON | 全局 |
 | motion.md | 4 |
+
+## 实施记录（2026-09-10）
+
+Task 1–4 全部完成，落在 `feat/rule-formula-motion`，共 5 个实现提交。
+全量 `py -m pytest tests/ -q` → 113 passed；`ruff check scripts/ tests/` 通过。
+真实画面已核对：`.scratch/formula_motion_demo.json` 全渲
+`output/formula_motion_demo.mp4`（fps 10 / 6 场 / 44.4s），按 manifest 的
+`narr_frames` 换算相位时刻抽帧比对，入场 → 主式 → 分子亮 → 分母亮四态齐备。
+
+与计划的偏离（都是有意为之）：
+
+1. **入场段加缓动**。计划写的是线性 `card_y = 8*(1-t)`；实作改走
+   `ease_out_cubic`，与 `zoom_in` 手感一致。分式线仍为线性（笔画等速）。
+2. **分项改累积点亮**。计划的二值点亮会让已讲过的项退回 0.45 全暗；
+   实作为三档 1.0 / 0.725 / 0.45（当前 / 已讲过 / 未讲到）。
+3. **`formula=None` 分支回落末态**。计划草图写 `--m-card-elev: 0`，会让预览
+   缩略图与溢出探测拍到无阴影的扁平卡；实作重置为卡落位、分式线满宽、分项全亮。
+4. **未改 `layout-rule-formula.html`**。`.formula-card` / `.formula-bar` 类名已
+   存在，规则全部收进 `MOTION_CSS`（注入在 layout 的 `</head>` 前，同特异度后者
+   胜出），Task 2 的模板改动量为零。
+
+其它：Task 3 的示例代码把 elapsed/duration 算了两次，实作只留一份；Task 4 抽的是
+4 帧（多了 u=0.90 的分母阶段）而非 3 帧；demo 用新建的
+`.scratch/formula_motion_demo.json`，未改动 phase-1 的 `formula_demo.json`。
