@@ -101,6 +101,25 @@ MOTION_CSS = """
     filter: drop-shadow(0 0 calc(var(--m-glow, 0) * 16px) currentColor);
     will-change: transform, filter;
   }
+  /* 公式页分步动效：类名只出现在 layout-rule-formula.html，其它页不命中。
+     默认值取末态（卡落位、分式线满宽、parts 全亮），JS 未跑时画面仍完整。 */
+  .formula-card{
+    transform: translateY(var(--m-card-y, 0px));
+    box-shadow: 0 calc(4px + var(--m-card-elev, 1) * 8px) calc(20px + var(--m-card-elev, 1) * 12px) rgba(0,0,0,0.22);
+    will-change: transform, box-shadow;
+  }
+  .formula-bar{
+    transform: scaleX(var(--m-frac-bar, 1));
+    transform-origin: center center;
+    will-change: transform;
+  }
+  .step[data-part-id]{
+    opacity: calc(0.45 + 0.55 * var(--m-part-on, 1));
+  }
+  [data-formula-main]{
+    transform: scale(var(--m-formula-hl, 1));
+    transform-origin: center center;
+  }
   .icon-inline{
     display: inline-flex;
     width: 1.15em;
@@ -469,15 +488,35 @@ def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
     return {**landed, "frac_bar": 1.0, "active_part": ids[idx]}
 
 
-def apply_motion_css_vars(page, scale, hl, glow):
+def apply_motion_css_vars(page, scale, hl, glow, formula=None):
+    """写本页动效 CSS 变量。formula 传 formula_motion_vars 的产物时叠加公式页
+    分步动效；传 None 表示该页无公式动效，五个变量一律回到末态——同一个 page
+    跨场景复用，不重置会把上一个公式页的残值带到下一页。
+    """
     page.evaluate(
-        """([s, h, g]) => {
+        """([s, h, g, f]) => {
           const b = document.body;
           b.style.setProperty('--m-scale', String(s));
           b.style.setProperty('--m-hl', String(h));
           b.style.setProperty('--m-glow', String(g));
+          const steps = [...document.querySelectorAll('.step[data-part-id]')];
+          if (!f) {
+            b.style.setProperty('--m-card-y', '0px');
+            b.style.setProperty('--m-card-elev', '1');
+            b.style.setProperty('--m-frac-bar', '1');
+            b.style.setProperty('--m-formula-hl', '1');
+            steps.forEach(el => el.style.setProperty('--m-part-on', '1'));
+            return;
+          }
+          b.style.setProperty('--m-card-y', f.card_y.toFixed(3) + 'px');
+          b.style.setProperty('--m-card-elev', f.card_elev.toFixed(4));
+          b.style.setProperty('--m-frac-bar', f.frac_bar.toFixed(4));
+          const active = f.active_part || '';
+          b.style.setProperty('--m-formula-hl', active === '__main__' ? '1.04' : '1');
+          steps.forEach(el => el.style.setProperty(
+            '--m-part-on', el.getAttribute('data-part-id') === active ? '1' : '0'));
         }""",
-        [round(scale, 4), round(hl, 4), round(glow, 4)],
+        [round(scale, 4), round(hl, 4), round(glow, 4), formula],
     )
 
 
