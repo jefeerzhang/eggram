@@ -22,6 +22,8 @@ style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker �
 显式 output 永远优先。活动运行竞争同一目标时，后启动者在 TTS/MP4 写入前
 被拒（FAIL_AT_PREFLIGHT + 占用诊断）；目标锁 `<output>.lock` 心跳保活，
 成功/失败/崩溃都释放，进程死亡后锁过期可接管，历史成片不删除。
+同 run_key 并行（同配置不同 output）另持 `<rdir>.lock`，整段流水线期间
+设 EGGRAM_RUN_OWNED 让子进程 make_video 跳过重复加锁，避免 preview/音轨交错。
 预览去重（#26）：每次 worker 运行生成唯一 token，Step 2 预览连同输入指纹
 （分镜/style/layout 字节 + motion 开关）写入 run 目录 stamp.json，Step 3 在
 「同 token + 同指纹」时复用该预览（steps 行记 PREVIEW_REUSED）——整个 worker
@@ -126,17 +128,41 @@ def main():
             style_name = "teaching"  # 缺/坏分镜由 preflight 报错，此处仅兜底命名
     out = args.output or ra.default_output_name(slug, style_name)
 
-    # 目标占用（#23）：TTS / MP4 写入前拒绝后启动者；成功、失败、崩溃都释放
+    # 目标占用（#23）+ run 目录占用：TTS / MP4 / preview 写入前拒绝后启动者；
+    # 成功、失败、崩溃都释放。EGGRAM_RUN_OWNED 让子进程跳过重复 run 锁。
+    out_lock = None
+    run_lock = None
     try:
-        lock = ra.acquire_target(out, storyboard=sb, style_name=style_name)
-    except ra.TargetOccupied as e:
-        emit("FAIL_AT_PREFLIGHT", diagnostic=str(e))
-        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
+        try:
+            out_lock = ra.acquire_target(out, storyboard=sb, style_name=style_name)
+        except ra.TargetOccupied as e:
+            emit("FAIL_AT_PREFLIGHT", diagnostic=str(e))
+            sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
 
-    try:
-        _pipeline(args, sb, out, style_name)
+        try:
+            with open(sb, encoding="utf-8") as f:
+                motion_on = (not args.no_motion) and (
+                    json.load(f).get("motion", True) is not False
+                )
+        except (OSError, ValueError):
+            motion_on = not args.no_motion
+        rdir = ra.run_dir(ROOT, slug, style_name, ra.run_key(sb, style_name, motion_on))
+        try:
+            run_lock = ra.acquire_run(rdir, storyboard=sb, style_name=style_name)
+        except ra.TargetOccupied as e:
+            emit("FAIL_AT_PREFLIGHT", diagnostic=str(e))
+            sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
+
+        os.environ["EGGRAM_RUN_OWNED"] = os.path.abspath(rdir)
+        try:
+            _pipeline(args, sb, out, style_name)
+        finally:
+            os.environ.pop("EGGRAM_RUN_OWNED", None)
     finally:
-        lock.release()
+        if run_lock:
+            run_lock.release()
+        if out_lock:
+            out_lock.release()
 
 
 def _cache_facts(sb, style_name, no_motion):

@@ -368,6 +368,58 @@ def main():
         f"   style={prep['style_name']} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
     )
     print(f"   run={rdir}")
+    # run 目录占用：同 run_key 并行写 preview/audio/manifest 会被拒。完整 worker
+    # 已在父进程持锁并设 EGGRAM_RUN_OWNED 时跳过，避免 preview→render 子进程互斥。
+    run_lock = None
+    owned = os.environ.get("EGGRAM_RUN_OWNED")
+    if owned != os.path.abspath(rdir):
+        try:
+            run_lock = ra.acquire_run(
+                rdir, storyboard=tpl_path, style_name=prep["style_name"]
+            )
+        except ra.TargetOccupied as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+    try:
+        _main_after_run_lock(
+            args,
+            tpl_path,
+            tpl,
+            prep,
+            scenes,
+            style,
+            W,
+            H,
+            FPS,
+            motion_enabled,
+            blocks_on,
+            rdir,
+            rkey,
+            slug,
+            out,
+        )
+    finally:
+        if run_lock:
+            run_lock.release()
+
+
+def _main_after_run_lock(
+    args,
+    tpl_path,
+    tpl,
+    prep,
+    scenes,
+    style,
+    W,
+    H,
+    FPS,
+    motion_enabled,
+    blocks_on,
+    rdir,
+    rkey,
+    slug,
+    out,
+):
     preview_out = args.preview_dir or ra.preview_dir(rdir)
     if not os.path.isabs(preview_out):
         preview_out = os.path.join(ROOT, preview_out)
@@ -720,11 +772,11 @@ def _file_sha(path):
 
 BLOCKS_DIR = os.path.join(TEMPLATE_DIR, "blocks")
 
-# kind → (block 文件名, timeline key, block 时长秒)；不在表内的 kind 走原静态布局
+# kind → (block 文件名, timeline key, block 时长秒, 根选择器)；不在表内的 kind 走原静态布局
 BLOCK_BY_KIND = {
-    "title": ("beat-freeze-cut.html", "beat-freeze-cut", 6.0),
-    "rule": ("cinematic-zoom.html", "main", 4.0),
-    "mistake": ("bar-chart-race.html", "bar-chart-race", 12.0),
+    "title": ("beat-freeze-cut.html", "beat-freeze-cut", 6.0, "#bfc-root"),
+    "rule": ("cinematic-zoom.html", "main", 4.0, "#root"),
+    "mistake": ("bar-chart-race.html", "bar-chart-race", 12.0, "#bcr-root"),
 }
 
 
@@ -753,7 +805,8 @@ def block_config(kind, sc, tpl):
             "secondaryLabel": sc.get("sub", ""),
         }
     if kind == "rule":
-        body = _strip_md(sc.get("body", "")).strip().replace("\n", "<br/>")
+        # 纯文本换行；模板侧用 textContent + <br> 节点渲染，不用 innerHTML
+        body = _strip_md(sc.get("body", "")).strip()
         return {
             "sceneFrom": "RULE",
             "sceneTo": _strip_md(sc.get("sub", "")) or tpl.get("title", ""),
@@ -776,7 +829,10 @@ def block_html(kind, sc, tpl, W, H):
     """block 模板整页 HTML（含 CONFIG 注入）；kind 无 block 或模板缺失 → None。
 
     block 原生 1920x1080；成片视口不同（分镜显式 width/height）时整体等比
-    缩放到视口，保持同帧尺寸进 ffmpeg pipe（image2pipe 要求统一帧大小）。"""
+    缩放到视口，保持同帧尺寸进 ffmpeg pipe（image2pipe 要求统一帧大小）。
+
+    CONFIG 经 application/json + JSON.parse 注入；`<` 写成 `\\u003c`，避免分镜
+    文本里的 `</script>` 被 HTML 解析器提前闭合脚本标签。"""
     entry = BLOCK_BY_KIND.get(kind)
     if not entry:
         return None
@@ -785,8 +841,15 @@ def block_html(kind, sc, tpl, W, H):
         return None
     with open(path, encoding="utf-8") as f:
         html = f.read()
-    cfg = json.dumps(block_config(kind, sc, tpl), ensure_ascii=False)
-    inject = "<script>window.__BLOCK_CONFIG=" + cfg + ";</script>"
+    cfg_safe = json.dumps(block_config(kind, sc, tpl), ensure_ascii=False).replace(
+        "<", "\\u003c"
+    )
+    inject = (
+        '<script type="application/json" id="eggram-block-config">'
+        f"{cfg_safe}</script>"
+        "<script>window.__BLOCK_CONFIG=JSON.parse("
+        'document.getElementById("eggram-block-config").textContent);</script>'
+    )
     scale = min(W / 1920.0, H / 1080.0)
     if abs(scale - 1.0) > 1e-6:
         inject += (
@@ -794,6 +857,47 @@ def block_html(kind, sc, tpl, W, H):
             "transform-origin:0 0;width:1920px;height:1080px;}}</style>"
         )
     return html.replace("<head>", "<head>" + inject, 1)
+
+
+def block_root_findings(info, root_sel, W, H):
+    """由根节点盒模型结果生成预览 findings（可单测；无浏览器依赖）。"""
+    if not info or info.get("missing"):
+        return [{"sel": root_sel, "msg": f"block 根节点缺失: {root_sel}"}]
+    w, h = float(info.get("w") or 0), float(info.get("h") or 0)
+    if w <= 0 or h <= 0:
+        return [{"sel": root_sel, "msg": f"block 根节点不可见（{w:.0f}×{h:.0f}）: {root_sel}"}]
+    left, top = float(info.get("left") or 0), float(info.get("top") or 0)
+    right, bottom = float(info.get("right") or 0), float(info.get("bottom") or 0)
+    if right <= 0 or bottom <= 0 or left >= W or top >= H:
+        return [
+            {
+                "sel": root_sel,
+                "msg": (
+                    f"block 根节点完全在视口外 "
+                    f"(box=[{left:.0f},{top:.0f},{right:.0f},{bottom:.0f}] "
+                    f"viewport={W}x{H}): {root_sel}"
+                ),
+            }
+        ]
+    return []
+
+
+def block_preview_check(page, root_sel, W, H):
+    """block 页最简预览闸门：根节点存在且在视口内有可见盒模型。"""
+    info = page.evaluate(
+        """([sel]) => {
+            const el = document.querySelector(sel);
+            if (!el) return {missing: true};
+            const r = el.getBoundingClientRect();
+            return {
+                missing: false,
+                w: r.width, h: r.height,
+                left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+            };
+        }""",
+        [root_sel],
+    )
+    return block_root_findings(info, root_sel, W, H)
 
 
 def init_block_page(page, html, key, timeout=10000):
@@ -871,8 +975,8 @@ def run_preview(
     """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。
 
     preview_dir 由调用方给定（缺省为 run 目录的 preview/，#22 产物归属）。
-    block 页（#27）整页换肤：只截 t=0 一帧，不做溢出探测（block 自带布局；
-    探测选择器是静态布局专属），初始化失败回退静态路径。
+    block 页（#27）整页换肤：只截 t=0 一帧；不做静态布局溢出探测（选择器
+    专属），改为根节点可见性/视口裁剪最简检查。初始化失败回退静态路径。
     """
     out_dir = (
         preview_dir if os.path.isabs(preview_dir) else os.path.join(ROOT, preview_dir)
@@ -895,18 +999,23 @@ def run_preview(
                     block_seek(page, block[1], 0.0)
                     # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
                     ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
+                    # 最简闸门：根节点可见且未完全裁出视口（block 不做静态布局溢出探测）
+                    findings = block_preview_check(page, block[3], W, H)
                     report.append(
                         {
                             "i": i,
                             "kind": kind,
                             "motion": motion,
                             "png": png,
-                            "findings": [],
+                            "findings": findings,
                             "placeholder_errs": [],
                             "block": _block_name(block),
                         }
                     )
-                    print(f"   scene {i} [{kind}/block:{_block_name(block)}]: OK  → {png}")
+                    tag = "OK" if not findings else "FAIL"
+                    print(
+                        f"   scene {i} [{kind}/block:{_block_name(block)}]: {tag}  → {png}"
+                    )
                     continue
                 print(
                     f"   WARN: scene {i} block {_block_name(block)} 初始化失败，回退静态布局",

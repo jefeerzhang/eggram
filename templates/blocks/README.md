@@ -105,9 +105,11 @@ ffmpeg -framerate 1 -i output/_preview_<name>_%04d.png -c:v libx264 -pix_fmt yuv
 - **唯一接缝**：`scripts/make_video.py` 的 `BLOCK_BY_KIND` 查找表——`title`→
   beat-freeze-cut、`rule`→cinematic-zoom、`mistake`→bar-chart-race；
   其余 kind 走原静态布局。分镜顶层 `"blocks": false` 可整支关闭。
-- **数据注入**：集成层把 page 数据映射为 `window.__BLOCK_CONFIG`（`<head>` 内
-  注入），block 里 `Object.assign` 合并进自己的 CONFIG——title 用 header/sub，
-  rule 用 header/sub/body（`**高亮**` 按 out-of-scope 约定剥成纯文本），
+- **数据注入**：集成层把 page 数据经 `application/json` + `JSON.parse` 写入
+  `window.__BLOCK_CONFIG`（`<` 转义为 `\u003c`，防 `</script>` 打断）；block
+  里 `Object.assign` 合并进自己的 CONFIG——title 用 header/sub，
+  rule 用 header/sub/body（纯文本换行，模板侧 textContent + `<br>`，不用
+  `innerHTML`；`**高亮**` 按 out-of-scope 约定剥成纯文本），
   mistake v1 用 block 内置样例数据（schema 的 `mistake-data` 扩展待后续）。
 - **帧驱动**：block 的 GSAP timeline 以 `paused` 建立（`window.__timelines`），
   渲染逐帧 `tl.time(min(k/fps, block 时长))` 驱动，跑完一遍后 hold 末态到旁白
@@ -116,6 +118,8 @@ ffmpeg -framerate 1 -i output/_preview_<name>_%04d.png -c:v libx264 -pix_fmt yuv
   `docs/json-schema.md`）；分镜显式钉其他分辨率时 block 整体等比缩放到视口。
 - **失败回退**：block 初始化失败（CDN 不可达 / JS 报错）打印 WARN 并回退该页
   静态布局，单页失败不阻断整支视频。
+- **预览闸门**：block 页不做静态布局溢出探测；改为根节点存在且在视口内有
+  可见盒模型（`block_preview_check`）。
 - **验收**：`templates/blocks/_smoke.py` 独立烟雾（timeline 就绪 + 根节点
   1920px）；端到端在 `tests/test_render_worker.py`（block 页进成片、manifest
   记录 scene.block、1080p、回退路径）。

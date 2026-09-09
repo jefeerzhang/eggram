@@ -301,3 +301,22 @@ def test_acquire_target_steals_stale_lock():
         assert not os.path.exists(lock)
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_acquire_run_blocks_parallel_same_key():
+    """同 run 目录并行占用被拒；释放后可再拿。"""
+    d = _mkdtemp("ra_runlock_")
+    try:
+        rdir = os.path.join(d, "runs", "lesson__teaching__abc123")
+        os.makedirs(rdir, exist_ok=True)
+        lock1 = ra.acquire_run(rdir, style_name="teaching")
+        try:
+            with pytest.raises(ra.TargetOccupied):
+                ra.acquire_run(rdir, style_name="teaching")
+        finally:
+            lock1.release()
+        assert not os.path.exists(rdir + ".lock")
+        lock2 = ra.acquire_run(rdir)
+        lock2.release()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
