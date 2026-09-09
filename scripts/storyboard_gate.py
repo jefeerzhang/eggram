@@ -440,9 +440,10 @@ _FORMULA_MAIN_END = 0.40
 def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
     """公式页分步动效变量（秒语义，与 frame_motion_state 同一时钟）。
 
-    duration 切成三段：入场 0–15% 卡抬起 → 主式 15–40% 分式线描画 →
-    余下按 parts 数量均分，逐项点亮。elapsed 到 duration 即冻在末态
-    （hold/尾垫期间画面不动）。无 id 的 part 被忽略；duration<=0 全冻初态。
+    duration 切成三段：入场 0–15% 卡抬起（ease-out 缓动，先快后缓）→
+    主式 15–40% 分式线匀速描画 → 余下按 parts 数量均分，逐项点亮。
+    elapsed 到 duration 即冻在末态（hold/尾垫期间画面不动）。
+    无 id 的 part 被忽略；duration<=0 全冻初态。
     """
     ids = [pid for p in parts or [] if (pid := str(p.get("id") or "").strip())]
     duration = max(0.0, float(duration_seconds))
@@ -451,7 +452,7 @@ def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
     u = max(0.0, min(duration, float(elapsed_seconds))) / duration
     landed = {"card_y": 0.0, "card_elev": 1.0}
     if u < _FORMULA_ENTER_END:
-        t = u / _FORMULA_ENTER_END
+        t = ease_out_cubic(u / _FORMULA_ENTER_END)
         return {
             "card_y": 8.0 * (1.0 - t),
             "card_elev": t,
