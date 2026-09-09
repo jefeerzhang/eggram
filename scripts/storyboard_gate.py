@@ -432,6 +432,42 @@ def frame_motion_state(effects, frame, fps, narr_frames):
     return motion_vars(effects, elapsed, duration)
 
 
+# 公式页时间线：入场与主式两段的终点（占旁白时长比例），余下均分给 parts
+_FORMULA_ENTER_END = 0.15
+_FORMULA_MAIN_END = 0.40
+
+
+def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
+    """公式页分步动效变量（秒语义，与 frame_motion_state 同一时钟）。
+
+    duration 切成三段：入场 0–15% 卡抬起 → 主式 15–40% 分式线描画 →
+    余下按 parts 数量均分，逐项点亮。elapsed 到 duration 即冻在末态
+    （hold/尾垫期间画面不动）。无 id 的 part 被忽略；duration<=0 全冻初态。
+    """
+    ids = [pid for p in parts or [] if (pid := str(p.get("id") or "").strip())]
+    duration = max(0.0, float(duration_seconds))
+    if duration <= 0:
+        return {"card_y": 8.0, "card_elev": 0.0, "frac_bar": 0.0, "active_part": ""}
+    u = max(0.0, min(duration, float(elapsed_seconds))) / duration
+    landed = {"card_y": 0.0, "card_elev": 1.0}
+    if u < _FORMULA_ENTER_END:
+        t = u / _FORMULA_ENTER_END
+        return {
+            "card_y": 8.0 * (1.0 - t),
+            "card_elev": t,
+            "frac_bar": 0.0,
+            "active_part": "",
+        }
+    if u < _FORMULA_MAIN_END:
+        frac = (u - _FORMULA_ENTER_END) / (_FORMULA_MAIN_END - _FORMULA_ENTER_END)
+        return {**landed, "frac_bar": frac, "active_part": "__main__"}
+    if not ids:
+        return {**landed, "frac_bar": 1.0, "active_part": "__main__"}
+    slot = (1.0 - _FORMULA_MAIN_END) / len(ids)
+    idx = min(len(ids) - 1, int((u - _FORMULA_MAIN_END) / slot))
+    return {**landed, "frac_bar": 1.0, "active_part": ids[idx]}
+
+
 def apply_motion_css_vars(page, scale, hl, glow):
     page.evaluate(
         """([s, h, g]) => {

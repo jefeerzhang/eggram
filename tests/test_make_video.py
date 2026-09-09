@@ -758,6 +758,38 @@ def test_chart_color_accepts_literal_hex():
         colors,
     )
     assert _curve_stroke(svg) == "#abc123"
+# ---- 11 公式页分步动效时间线 ----
+
+
+def test_formula_motion_vars_timeline_phases():
+    parts = [{"id": "num"}, {"id": "den"}]
+    # 入场中点（0–15%）：卡抬起中，分式线未开始，无激活项
+    v0 = sg.formula_motion_vars(parts, 0.075, 1.0)
+    assert v0["active_part"] == ""
+    assert 0 < v0["card_y"] <= 8
+    assert v0["frac_bar"] == 0
+    # 主式区（15–40%）：卡已落位，分式线描画中
+    v1 = sg.formula_motion_vars(parts, 0.25, 1.0)
+    assert v1["active_part"] == "__main__"
+    assert v1["card_y"] == 0
+    assert v1["frac_bar"] > 0
+    # parts 区均分剩余（每项 30%）：0.40–0.70 → 第一项
+    v2 = sg.formula_motion_vars(parts, 0.50, 1.0)
+    assert v2["active_part"] == "num"
+    assert v2["frac_bar"] == 1.0
+    # 0.70–1.00 → 第二项
+    v3 = sg.formula_motion_vars(parts, 0.85, 1.0)
+    assert v3["active_part"] == "den"
+    # hold/尾垫（elapsed ≥ duration）冻在末态
+    v4 = sg.formula_motion_vars(parts, 2.0, 1.0)
+    assert v4["active_part"] == "den"
+    assert v4["card_y"] == 0
+
+
+def test_formula_motion_vars_zero_duration():
+    v = sg.formula_motion_vars([{"id": "a"}, {"id": "b"}], 0.0, 0.0)
+    assert v["active_part"] == ""
+    assert v["card_y"] == 8
 
 
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
