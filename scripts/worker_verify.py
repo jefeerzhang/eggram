@@ -12,9 +12,9 @@
 全过 → stdout `VERIFY_OK [<六格>]`、exit 0；任一失败 → exit 4 + FAIL_AT_VERIFY 文案。
 
 音轨定位（#22）：按 (分镜文件字节, style, motion 开关) 重算 run_key 精确定位
-本次运行的 manifest，用 manifest 列出的「本次实际音轨集合」独立测量；manifest
-不存在时回退旧版共享音轨 `_build/<slug>/s{i}_{fp}.wav`（兼容迁移前产物）。
-不猜最近目录、不扫同名残留文件。
+本次运行的 manifest，用 manifest 列出的「本次实际音轨集合」独立测量。manifest
+不存在 → 检查 4 直接失败（视为未渲染/未完成），不回退到共享 raw 目录猜文件名：
+那会量到上一版或别的皮肤的音轨，比报错更糟。也不猜最近目录、不扫同名残留文件。
 """
 
 import argparse
@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import run_artifacts as ra  # noqa: E402
 import worker_result as wr  # noqa: E402
+from storyboard_gate import resolve_motion_enabled  # noqa: E402
 from make_video import (  # noqa: E402
     _audio_paths,
     _cache_hit,
@@ -55,23 +56,22 @@ def wav_duration(path):
         return w.getnframes() / w.getframerate()
 
 
-def resolve_audio_sources(storyboard, tpl, style_name, motion_enabled):
-    """返回 (音轨路径列表, 来源说明, manifest)。run manifest 优先，旧版共享音轨回退。"""
-    slug = os.path.splitext(os.path.basename(storyboard))[0]
-    rkey = ra.run_key(storyboard, style_name, motion_enabled)
-    rdir = ra.run_dir(ROOT, slug, style_name, rkey)
+def resolve_audio_sources(storyboard, style_name, motion_enabled):
+    """返回 (本次实际音轨列表, 来源说明, manifest)。
+
+    manifest 由 make_video 执行时写出，是本次运行音轨的唯一权威清单；缺失即
+    视为未渲染或渲染未完成，返回空清单由调用方判失败。不回退到共享 raw 目录
+    猜文件名——那会量到上一版或别的皮肤的音轨。
+    """
+    rdir = ra.locate_run(ROOT, storyboard, style_name, motion_enabled)
     manifest = ra.read_manifest(rdir)
-    if manifest and manifest.get("schema") == ra.MANIFEST_SCHEMA:
-        wavs = [sc["wav"] for sc in manifest.get("scenes", [])]
-        if wavs:
-            return wavs, f"run:{rdir}", manifest
-    cache_dir = os.path.join(ROOT, "_build", slug)
-    wavs = []
-    for i, sc in enumerate(tpl["scenes"]):
-        sc_voice = resolve_voice(sc, tpl)
-        _, wav_path = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
-        wavs.append(wav_path)
-    return wavs, f"legacy:{cache_dir}", None
+    if not manifest or manifest.get("schema") != ra.MANIFEST_SCHEMA:
+        return [], f"no-manifest:{rdir}", None
+    return (
+        [sc["wav"] for sc in manifest.get("scenes", [])],
+        f"run:{rdir}",
+        manifest,
+    )
 
 
 def _cache_facts(manifest):
@@ -113,9 +113,19 @@ def main():
     # ±5% 双向容差；诊断标明偏长/偏短
     with open(args.storyboard, encoding="utf-8") as f:
         tpl = json.load(f)
-    motion_enabled = (not args.no_motion) and (tpl.get("motion", True) is not False)
+    motion_enabled = resolve_motion_enabled(tpl, args.no_motion)
     style_name = args.style or tpl.get("style", "teaching")
-    wavs, src, manifest = resolve_audio_sources(args.storyboard, tpl, style_name, motion_enabled)
+    wavs, src, manifest = resolve_audio_sources(
+        args.storyboard, style_name, motion_enabled
+    )
+    if not wavs:
+        fail(
+            4,
+            f"本次运行没有 manifest，拿不到实际音轨清单\n"
+            f"  定位到的 run 目录: {src}\n"
+            f"  若渲染时用了 --style/--no-motion，验收须传相同参数以定位同一次运行；"
+            f" 或先完成渲染",
+        )
     expected = 0.0
     for w in wavs:
         if not os.path.isfile(w):

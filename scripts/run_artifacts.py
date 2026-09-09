@@ -45,6 +45,17 @@ def run_dir(root, slug, style_name, key):
     return os.path.join(root, "_build", "runs", f"{slug}__{style_key_of(style_name)}__{key}")
 
 
+def locate_run(root, storyboard_path, style_name, motion_enabled):
+    """由 (分镜字节, style, motion 开关) 直接得到本次 run 目录。
+
+    run_key 与 run_dir 在三个入口里总是成对使用，收成一个调用，免得各拼一遍。
+    """
+    slug = os.path.splitext(os.path.basename(storyboard_path))[0]
+    return run_dir(
+        root, slug, style_name, run_key(storyboard_path, style_name, motion_enabled)
+    )
+
+
 def preview_dir(rdir):
     return os.path.join(rdir, "preview")
 
