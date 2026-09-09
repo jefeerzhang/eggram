@@ -48,7 +48,7 @@ LAYOUT_VARIANTS = {
 # 未知或缺失变体回退默认布局，故只校验实际存在的变体文件。
 LAYOUT_VARIANT_SLOTS = {
     ("rule", "side"): ["__ZH__"],
-    ("rule", "formula"): ["__ZH__"],
+    ("rule", "formula"): ["__FORMULA_MAIN__", "__PARTS__"],
     ("example", "side"): ["__WRONG_BODY__"],
 }
 KIND_BADGE = {
@@ -444,6 +444,48 @@ def apply_motion_css_vars(page, scale, hl, glow):
     )
 
 
+def build_formula_main_html(formula, kind):
+    """主公式 HTML：优先 num+den 分式，否则 display 单行。"""
+    num = (formula.get("num") or "").strip()
+    den = (formula.get("den") or "").strip()
+    if num and den:
+        return (
+            '<div class="formula-frac" data-formula-main="1">'
+            f'<div class="formula-num">{highlight_body(num, kind)}</div>'
+            '<div class="formula-bar" aria-hidden="true"></div>'
+            f'<div class="formula-den">{highlight_body(den, kind)}</div>'
+            "</div>"
+        )
+    display = formula.get("display") or ""
+    return (
+        f'<div class="formula" data-formula-main="1">'
+        f"{highlight_body(display, kind)}</div>"
+    )
+
+
+def build_formula_parts_html(parts, *, legacy_zh="", badge=""):
+    """分项 HTML；parts 为 None 时走旧双步（zh + badge）兼容。"""
+    if parts is None:
+        items = [
+            {"id": "legacy1", "label": "1", "text": legacy_zh},
+            {"id": "legacy2", "label": "2", "text": badge},
+        ]
+    else:
+        items = parts
+    chunks = ['<div class="breakdown">']
+    for i, p in enumerate(items):
+        pid = _escape(str(p.get("id") or f"p{i}"))
+        label = _escape(str(p.get("label") or str(i + 1)))
+        text = highlight_body(p.get("text") or "", "rule")
+        chunks.append(
+            f'<div class="step" data-part-id="{pid}">'
+            f'<div class="step-num">{label}</div>'
+            f'<div class="step-text part-text">{text}</div></div>'
+        )
+    chunks.append("</div>")
+    return "".join(chunks)
+
+
 def render_html(sc, W, H, style, motion_enabled=True):
     """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。"""
     kind = resolve_kind(sc)
@@ -455,6 +497,19 @@ def render_html(sc, W, H, style, motion_enabled=True):
         html = MOTION_CSS + html
     body_html = highlight_body(sc.get("body", ""), kind)
     zh = sc.get("zh", sc.get("sub", ""))
+    formula = sc.get("formula") if isinstance(sc.get("formula"), dict) else None
+    use_formula = kind == "rule" and layout_variant == "formula"
+    if use_formula and formula is not None:
+        formula_main = build_formula_main_html(formula, kind)
+        parts_html = build_formula_parts_html(formula.get("parts"))
+    elif use_formula:
+        formula_main = f'<div class="formula" data-formula-main="1">{body_html}</div>'
+        parts_html = build_formula_parts_html(
+            None, legacy_zh=str(zh), badge=KIND_BADGE.get(kind, "")
+        )
+    else:
+        formula_main = ""
+        parts_html = ""
     # __THINK__：仅 practice layout 有。缺省沿用文案；显式空字符串隐藏提示与间距。
     think_html = None
     if "__THINK__" in html:
@@ -479,6 +534,8 @@ def render_html(sc, W, H, style, motion_enabled=True):
         "__SUB__": _escape(sc.get("sub", "")),
         "__ZH__": _escape(zh),
         "__BODY__": body_html,
+        "__FORMULA_MAIN__": formula_main,
+        "__PARTS__": parts_html,
         "__WRONG_BODY__": highlight_body(sc.get("wrong_body", ""), "mistake"),
         "__CHART__": chart_html,
         "__CHART_MOTION__": (
@@ -555,6 +612,8 @@ def validate_layouts():
                 continue
             raw = open(path, encoding="utf-8").read()
             need = _layout_needs(kind) + LAYOUT_VARIANT_SLOTS.get((kind, variant), [])
+            if (kind, variant) == ("rule", "formula"):
+                need = [s for s in need if s != "__BODY__"]
             _check_layout_file(vfn, raw, need, errors)
     return errors
 
@@ -801,7 +860,11 @@ _OVERFLOW_SELECTORS_BY_KIND = {
         ".sub",
         ".body",
         ".formula",
+        ".formula-frac",
+        ".formula-num",
+        ".formula-den",
         ".step-text",
+        ".part-text",
         ".example-text",
         ".hl",
         ".err",

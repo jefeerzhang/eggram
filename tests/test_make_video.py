@@ -525,6 +525,54 @@ def test_formula_on_non_rule_warns():
     assert any("formula" in w for w in warns)
 
 
+def test_build_formula_main_html_fraction():
+    html = sg.build_formula_main_html(
+        {"num": "R<sub>p</sub>", "den": "σ<sub>p</sub>"}, "rule"
+    )
+    assert 'class="formula-frac"' in html
+    assert 'class="formula-num"' in html
+    assert 'class="formula-den"' in html
+    assert "R<sub>p</sub>" in html
+    assert "σ<sub>p</sub>" in html
+
+
+def test_build_formula_main_html_display_fallback():
+    html = sg.build_formula_main_html({"display": "R<sub>p</sub>/σ"}, "rule")
+    assert 'class="formula"' in html
+    assert "R<sub>p</sub>/σ" in html
+    assert "formula-frac" not in html
+
+
+def test_render_html_formula_injects_parts_and_data_id():
+    sc = _rule_formula_scene()
+    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    assert "__FORMULA_MAIN__" not in html
+    assert "__PARTS__" not in html
+    assert 'data-part-id="num"' in html
+    assert 'data-part-id="den"' in html
+    assert "超额" in html
+
+
+def test_render_html_legacy_formula_variant_uses_body():
+    sc = {
+        "kind": "rule", "layout_variant": "formula",
+        "header": "H", "sub": "S", "body": "E = **mc**", "zh": "步骤说明",
+        "narrate": "n",
+    }
+    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    assert "mc" in html or '<span class="hl">' in html
+    assert "步骤说明" in html
+
+
+def test_formula_layout_has_formula_slots():
+    raw = open("templates/layout-rule-formula.html", encoding="utf-8").read()
+    assert "__FORMULA_MAIN__" in raw
+    assert "__PARTS__" in raw
+    assert "__BODY__" not in raw or raw.count("__BODY__") == 0
+    errs = mv.validate_layouts()
+    assert not any("layout-rule-formula.html" in e for e in errs), errs
+
+
 # ---- 09 独立闸门（storyboard_gate）：唯一规则源 ----
 
 
