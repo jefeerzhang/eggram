@@ -764,15 +764,17 @@ def test_chart_color_accepts_literal_hex():
 def test_formula_motion_vars_timeline_phases():
     parts = [{"id": "num"}, {"id": "den"}]
     # 入场中点（0–15%）：卡抬起中，分式线未开始，无激活项
+    # ease_out_cubic(0.5)=0.875 → 抬起已到 7/8，明显快于线性的一半
     v0 = sg.formula_motion_vars(parts, 0.075, 1.0)
     assert v0["active_part"] == ""
-    assert 0 < v0["card_y"] <= 8
+    assert v0["card_elev"] == pytest.approx(0.875)
+    assert v0["card_y"] == pytest.approx(1.0)
     assert v0["frac_bar"] == 0
-    # 主式区（15–40%）：卡已落位，分式线描画中
+    # 主式区（15–40%）：卡已落位，分式线匀速描画（刻意不缓动 → 笔画等速）
     v1 = sg.formula_motion_vars(parts, 0.25, 1.0)
     assert v1["active_part"] == "__main__"
     assert v1["card_y"] == 0
-    assert v1["frac_bar"] > 0
+    assert v1["frac_bar"] == pytest.approx(0.4)
     # parts 区均分剩余（每项 30%）：0.40–0.70 → 第一项
     v2 = sg.formula_motion_vars(parts, 0.50, 1.0)
     assert v2["active_part"] == "num"
