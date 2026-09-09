@@ -559,6 +559,49 @@ def validate_layouts():
     return errors
 
 
+def validate_formula_field(sc, prefix):
+    """返回 (errors, warnings)。仅在 rule+formula 变体调用。"""
+    errors, warnings = [], []
+    formula = sc.get("formula")
+    if not isinstance(formula, dict):
+        errors.append(f"{prefix}: formula 须为 object")
+        return errors, warnings
+    num = formula.get("num")
+    den = formula.get("den")
+    display = (formula.get("display") or "").strip()
+    has_frac = bool((num or "").strip() and (den or "").strip())
+    if not has_frac and not display:
+        errors.append(
+            f"{prefix}: formula 须提供 num+den，或非空 display"
+        )
+    body = (sc.get("body") or "").strip()
+    if body:
+        warnings.append(
+            f"{prefix}: 已提供 formula，body 将被忽略（以 formula 为准）"
+        )
+    parts = formula.get("parts")
+    if parts is None:
+        return errors, warnings
+    if not isinstance(parts, list) or not (2 <= len(parts) <= 4):
+        errors.append(f"{prefix}: formula.parts 须为长度 2–4 的数组")
+        return errors, warnings
+    seen = set()
+    for j, p in enumerate(parts):
+        pp = f"{prefix}.formula.parts[{j}]"
+        if not isinstance(p, dict):
+            errors.append(f"{pp}: 须为 object")
+            continue
+        for f in ("id", "label", "text"):
+            if not str(p.get(f) or "").strip():
+                errors.append(f"{pp}: {f} 不能为空")
+        pid = str(p.get("id") or "").strip()
+        if pid:
+            if pid in seen:
+                errors.append(f"{pp}: id={pid!r} 重复")
+            seen.add(pid)
+    return errors, warnings
+
+
 def validate_storyboard(tpl):
     """返回 (errors, warnings)。errors 非空 → 闸门失败；warnings 仅打印。"""
     errors, warnings = [], []
@@ -593,7 +636,25 @@ def validate_storyboard(tpl):
             continue
         kinds_seen.append(kind)
         role = sc.get("role") or KIND_TO_ROLE.get(kind, "")
-        for field in ("header", "body", "narrate"):
+        variant = sc.get("layout_variant")
+        if sc.get("formula") is not None:
+            if kind != "rule" or variant != "formula":
+                warnings.append(
+                    f"{prefix}: formula 仅用于 rule+layout_variant=formula"
+                )
+            else:
+                fe, fw = validate_formula_field(sc, prefix)
+                errors.extend(fe)
+                warnings.extend(fw)
+        required = ["header", "narrate"]
+        formula_ok = (
+            kind == "rule"
+            and variant == "formula"
+            and isinstance(sc.get("formula"), dict)
+        )
+        if not formula_ok:
+            required = ["header", "body", "narrate"]
+        for field in required:
             val = (sc.get(field) or "").strip()
             if not val:
                 errors.append(f"{prefix}: {field} 不能为空")

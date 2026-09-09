@@ -460,6 +460,71 @@ def test_side_example_accepts_independent_wrong_body():
     assert errors == []
 
 
+def _rule_formula_scene(**kw):
+    sc = {
+        "kind": "rule",
+        "layout_variant": "formula",
+        "header": "夏普",
+        "sub": "副",
+        "narrate": "旁白",
+        "body": "",
+        "formula": {
+            "num": "R<sub>p</sub>",
+            "den": "σ<sub>p</sub>",
+            "parts": [
+                {"id": "num", "label": "分子", "text": "超额"},
+                {"id": "den", "label": "分母", "text": "波动"},
+            ],
+        },
+    }
+    sc.update(kw)
+    return sc
+
+
+def test_formula_scene_accepts_num_den_parts():
+    tpl = {"title": "T", "voice": "mimo_default", "scenes": [_rule_formula_scene()]}
+    errs, warns = sg.validate_storyboard(tpl)
+    assert not any("formula" in e or "body" in e for e in errs), errs
+
+
+def test_formula_scene_requires_display_or_num_den():
+    sc = _rule_formula_scene()
+    sc["formula"] = {"parts": [{"id": "a", "label": "A", "text": "t"},
+                               {"id": "b", "label": "B", "text": "t"}]}
+    tpl = {"title": "T", "voice": "mimo_default", "scenes": [sc]}
+    errs, _ = sg.validate_storyboard(tpl)
+    assert any("formula" in e and ("display" in e or "num" in e or "den" in e) for e in errs)
+
+
+def test_formula_scene_parts_length_and_unique_id():
+    sc = _rule_formula_scene()
+    sc["formula"]["parts"] = [{"id": "x", "label": "A", "text": "t"}]  # len 1
+    errs, _ = sg.validate_storyboard({"title": "T", "voice": "mimo_default", "scenes": [sc]})
+    assert any("parts" in e for e in errs)
+    sc2 = _rule_formula_scene()
+    sc2["formula"]["parts"] = [
+        {"id": "x", "label": "A", "text": "t"},
+        {"id": "x", "label": "B", "text": "t"},
+    ]
+    errs2, _ = sg.validate_storyboard({"title": "T", "voice": "mimo_default", "scenes": [sc2]})
+    assert any("id" in e for e in errs2)
+
+
+def test_formula_scene_body_nonempty_warns():
+    sc = _rule_formula_scene(body="旧正文")
+    _, warns = sg.validate_storyboard({"title": "T", "voice": "mimo_default", "scenes": [sc]})
+    assert any("body" in w and "formula" in w for w in warns)
+
+
+def test_formula_on_non_rule_warns():
+    sc = {
+        "kind": "example", "header": "h", "body": "**b**", "narrate": "n",
+        "formula": {"display": "x"},
+    }
+    _, warns = sg.validate_storyboard({"title": "T", "voice": "mimo_default", "scenes": [sc]})
+    assert any("formula" in w for w in warns)
+
+
 # ---- 09 独立闸门（storyboard_gate）：唯一规则源 ----
 
 
