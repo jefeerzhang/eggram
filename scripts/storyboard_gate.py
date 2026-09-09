@@ -522,7 +522,7 @@ def render_html(sc, W, H, style, motion_enabled=True):
             think_html = _escape(str(think))
     chart_raw = sc.get("chart", "")
     chart_html = (
-        resolve_chart(chart_raw, style)
+        resolve_chart(chart_raw, style_token_map(style))
         if isinstance(chart_raw, dict)
         else str(chart_raw)
     )

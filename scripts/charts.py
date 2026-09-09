@@ -59,7 +59,6 @@ def _draw_axes(
     ymax,
     xticks=None,
     yticks=None,
-    accent="#ffb020",
     ink_sub="#9aa3b2",
 ):
     parts = []
@@ -135,7 +134,7 @@ def _compute_default_points(fn, xmin, xmax, n=40):
     return pts
 
 
-def build_curve_svg(chart, style):
+def build_curve_svg(chart, colors):
     """
     chart = {
         "axes": {"x": "消费量 Q", "y": "边际效用 MU"},
@@ -148,13 +147,12 @@ def build_curve_svg(chart, style):
         "xticks": [0,1,2,3,4,5],
         "yticks": [0,25,50,75,100]
     }
+    colors 为 style_token_map() 的产物（__ACCENT__ 等 token → 当前皮肤色值）；
+    chart 里的 color 字段已由 resolve_chart 换成实际色值，故此处只兜默认。
     """
-    s = style
-    accent = s.get("accent", "#ffb020")
-    correct = s.get("correct", "#2ecc71")
-    wrong = s.get("wrong", "#e74c3c")
-    ink_sub = s.get("ink_sub", "#9aa3b2")
-    surface = s.get("surface", "rgba(255,255,255,0.06)")
+    accent = colors["__ACCENT__"]
+    ink_sub = colors["__INK_SUB__"]
+    surface = colors["__SURFACE__"]
 
     r = chart.get("range", {})
     xmin, xmax = r.get("xmin", 0), r.get("xmax", 5)
@@ -165,9 +163,7 @@ def build_curve_svg(chart, style):
     ylabel = axes.get("y", "")
 
     curve = chart.get("curve", {})
-    curve_color = (
-        accent if curve.get("color") == "__ACCENT__" else curve.get("color", accent)
-    )
+    curve_color = curve.get("color", accent)
     curve_width = curve.get("width", 5)
 
     # 计算曲线点
@@ -202,7 +198,7 @@ def build_curve_svg(chart, style):
     # 坐标轴
     parts.append(
         _draw_axes(
-            xlabel, ylabel, xmin, xmax, ymin, ymax, xticks, yticks, accent, ink_sub
+            xlabel, ylabel, xmin, xmax, ymin, ymax, xticks, yticks, ink_sub
         )
     )
 
@@ -230,19 +226,7 @@ def build_curve_svg(chart, style):
     for idx, hl in enumerate(highlights):
         hx = _xpx(hl["x"], xmin, xmax)
         hy = _ypx(hl["y"], ymin, ymax)
-        hl_color = (
-            accent
-            if hl.get("color") == "__ACCENT__"
-            else (
-                wrong
-                if hl.get("color") == "__WRONG__"
-                else (
-                    correct
-                    if hl.get("color") == "__CORRECT__"
-                    else hl.get("color", accent)
-                )
-            )
-        )
+        hl_color = hl.get("color", accent)
         label = hl.get("label", "")
         delay = 1.2 + idx * 0.4
 
@@ -278,9 +262,14 @@ def build_curve_svg(chart, style):
 
 
 # ── 解析入口 ──────────────────────────────────────────────────────────────────
-def resolve_chart(chart, style):
+def resolve_chart(chart, colors):
     """从分镜 chart 字段解析 SVG 字符串。
-    支持两种格式：
+
+    colors 为 style_token_map() 的产物（token → 当前皮肤色值）。chart 里的
+    `color` 字段既可写 __ACCENT__ / __WRONG__ / __CORRECT__ 等 token（换成皮肤
+    色），也可写字面 hex（原样保留）。
+
+    两种入参格式：
     1. 字符串 → 原样返回（手写 SVG 兼容）
     2. 对象 → preset 为 "curve" 时生成曲线图，否则返回空串
     """
@@ -289,28 +278,18 @@ def resolve_chart(chart, style):
     if not isinstance(chart, dict) or chart.get("preset") != "curve":
         return ""
 
-    # 解析颜色 token：__ACCENT__ / __WRONG__ / __CORRECT__ → 实际色值
-    def resolve_color(val):
-        token_map = {
-            "__ACCENT__": style.get("accent", "#ffb020"),
-            "__WRONG__": style.get("wrong", "#e74c3c"),
-            "__CORRECT__": style.get("correct", "#2ecc71"),
-            "__INK_SUB__": style.get("ink_sub", "#9aa3b2"),
-        }
-        return token_map.get(str(val), str(val))
-
     def walk(obj):
         if isinstance(obj, dict):
-            out = {}
-            for k, v in obj.items():
-                if k in ("color",) and isinstance(v, str):
-                    out[k] = resolve_color(v)
-                else:
-                    out[k] = walk(v)
-            return out
+            return {
+                k: (
+                    colors.get(v, v)
+                    if k == "color" and isinstance(v, str)
+                    else walk(v)
+                )
+                for k, v in obj.items()
+            }
         if isinstance(obj, list):
             return [walk(i) for i in obj]
         return obj
 
-    resolved = walk(chart)
-    return build_curve_svg(resolved, style)
+    return build_curve_svg(walk(chart), colors)
