@@ -31,16 +31,21 @@ Storyboard JSON 的 `body` / `sub` / `header` 字段怎么写这些。
 
 **正确**：用 `<sub>` 标签。
 
-### ❌ 占位符不能带下划线
+### ❌ 占位符不能带下划线，也不能用正文里可能出现的 `@...@`
 
-如果你将来扩展 `_escape` 加新占位符（例如 `@FRAC@`），
-**禁用下划线**作为占位符命名。`@FRAC_OPEN@` 会被 `.replace("_")` 误伤成 `@FRAC&#95;OPEN@`。
+`_escape` 内部用 **NUL 包裹**的短 token（并先剥掉原文里的 NUL），避免旧版 `@BR@`
+被正文原样撞上后误还原成 `<br>`。
 
-参考实现见 `scripts/storyboard_gate.py` 的 `_escape()`。
+如果你将来扩展占位符：**禁用下划线**（会被 `.replace("_")` 误伤），也**不要**用
+用户可能敲出的明文 token。参考 `scripts/storyboard_gate.py` 的 `_escape()`。
 
 ### ❌ 不可用 `<script>` 等任意标签
 
 白名单外标签一律 escape。`<script>alert(1)</script>` 会显示成文本，不会执行。
+
+### ❌ 不要嵌套 `<sub>` / `<sup>`
+
+非贪婪匹配只吃最内层一对；嵌套会产出畸形 HTML。公式里写一层即可。
 
 ## 例子
 

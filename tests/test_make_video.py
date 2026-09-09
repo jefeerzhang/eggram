@@ -62,6 +62,27 @@ def wav_bytes(pcm, rate=24000, channels=1, sampwidth=2, extra_list=False):
 # ---- 01 教学文本转义 ----
 
 
+def test_escape_sub_sup_whitelist_and_literal_guards():
+    """公式白名单透传；R_p 仍转实体；任意标签与占位符字面不被误还原。"""
+    assert sg._escape("R<sub>p</sub>") == "R<sub>p</sub>"
+    assert sg._escape("X<sup>2</sup>") == "X<sup>2</sup>"
+    assert sg._escape("A<br>B") == "A<br>B"
+    assert sg._escape("R_p") == "R&#95;p"
+    assert sg._escape("<script>x</script>") == "&lt;script&gt;x&lt;/script&gt;"
+    # 白名单内侧仍 escape，防 <sub><img></sub>
+    assert sg._escape("<sub><img src=x></sub>") == "<sub>&lt;img src=x&gt;</sub>"
+    # 带属性的 opening tag 不进白名单
+    assert "&lt;sub onclick=x&gt;" in sg._escape("<sub onclick=x>y</sub>")
+    # 旧占位符字面 / NUL 不得变成标签
+    assert sg._escape("@BR@ literal") == "@BR@ literal"
+    assert "<br>" not in sg._escape("@BR@ literal")
+    assert sg._escape("a\x00b") == "ab"
+    # highlight 路径同样保留下标
+    out = mv.highlight_body("夏普：**R<sub>p</sub>**", "rule")
+    assert "R<sub>p</sub>" in out
+    assert "<span class=\"hl\">" in out
+
+
 def test_highlight_body_escapes_and_keeps_highlight():
     out = mv.highlight_body("区间：**0<x<1**", "rule")
     assert "区间：" in out
