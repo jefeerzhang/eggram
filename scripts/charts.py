@@ -134,6 +134,21 @@ def _compute_default_points(fn, xmin, xmax, n=40):
     return pts
 
 
+def _curve_band(pts, xmin, xmax, ymin, ymax, x_left, x_right):
+    """折线在屏幕 x 区间 [x_left, x_right] 内的 y 上下界 (top, bottom)；
+    与所有线段都无交集时返回 None。分段线性 → 极值只落在区间端点或顶点上。"""
+    screen = [(_xpx(p["x"], xmin, xmax), _ypx(p["y"], ymin, ymax)) for p in pts]
+    ys = []
+    for (ax, ay), (bx, by) in zip(screen, screen[1:]):
+        lo, hi = min(ax, bx), max(ax, bx)
+        if hi < x_left or lo > x_right:
+            continue
+        for x in (max(lo, x_left), min(hi, x_right)):
+            span = bx - ax
+            ys.append(ay if span == 0 else ay + (by - ay) * (x - ax) / span)
+    return (min(ys), max(ys)) if ys else None
+
+
 def build_curve_svg(chart, colors):
     """
     chart = {
@@ -235,14 +250,20 @@ def build_curve_svg(chart, colors):
             f"<circle cx='{hx}' cy='{hy}' r='7' fill='{hl_color}' "
             f"class='glow-point' style='animation-delay:{delay:.1f}s'/>"
         )
-        # 标签（始终在点的上方，保持 14px 间隙，不压线）
-        ly = hy - 14
-        # 如果靠近顶部就放到下方
-        if ly < 20:
-            ly = hy + 22
         # 标签盒以点为中心，再按盒宽把中心夹回画布内：靠边的点若继续外推会被裁掉
         lw = len(label) * 7.5 + 8
         lx = min(max(hx, lw / 2 + 4), _VW - lw / 2 - 4)
+        # 默认摆在点上方；盒高 16（基线上下各 11 / 5），与折线带之间留 6px 间隙
+        ly = hy - 14
+        band = _curve_band(raw_pts, xmin, xmax, ymin, ymax, lx - lw / 2, lx + lw / 2)
+        if band:
+            top, bottom = band
+            if ly + 5 > top - 6:  # 盒底压进折线带 → 上抬到间隙之外
+                ly = top - 17
+            if ly - 11 < 12:  # 上方顶到画布上沿 → 翻到折线下方
+                ly = bottom + 17
+        elif ly < 20:  # 该横向区间没有折线经过（如单点）：只保住画布上沿
+            ly = hy + 22
         parts.append(
             f"<rect x='{lx - lw / 2}' y='{ly - 11}' width='{lw}' height='16' "
             f"rx='3' fill='{surface}' class='stagger-item' "
