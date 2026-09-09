@@ -562,6 +562,22 @@ def build_formula_parts_html(parts, *, legacy_zh="", badge=""):
     return "".join(chunks)
 
 
+def formula_parts_for_motion(sc):
+    """该页是否走公式分步动效，并交出 parts 作为时间线输入。
+
+    仅 `rule` + `layout_variant: formula` 且 `formula.parts` 为非空 list 时返回；
+    其它一律 None（不叠加变量）。旧双步 formula 页没有 parts，其 legacy step
+    由 apply_motion_css_vars 的 None 分支保持常亮。
+    """
+    if resolve_kind(sc) != "rule" or sc.get("layout_variant") != "formula":
+        return None
+    formula = sc.get("formula")
+    if not isinstance(formula, dict):
+        return None
+    parts = formula.get("parts")
+    return parts if isinstance(parts, list) and parts else None
+
+
 def render_html(sc, W, H, style, motion_enabled=True):
     """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。"""
     kind = resolve_kind(sc)
