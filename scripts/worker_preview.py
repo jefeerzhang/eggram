@@ -1,10 +1,12 @@
-"""worker_preview.py — render worker Step 2 预览闸门（GitHub issues #12/#18）
+"""worker_preview.py — render worker Step 2 预览闸门（GitHub issues #12/#18/#22）
 
 用法: py scripts/worker_preview.py examples/<slug>.json [output_path] [--preview-dir DIR]
       [--style NAME] [--no-motion] [--browser PATH]
 
 跑 make_video.py --preview，再核对截图齐全 + 溢出报告干净。
 全过 → stdout `PREVIEW_OK <n> frames`、exit 0；任一失败 → 诊断、exit 2（FAIL_AT_PREVIEW）。
+预览目录口径与 make_video 一致（#22）：缺省为 run 目录 preview/
+（run_key 由分镜字节+style+motion 开关决定），显式 --preview-dir 可覆盖。
 """
 
 import argparse
@@ -14,7 +16,10 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
 MAKE_VIDEO = os.path.join(ROOT, "scripts", "make_video.py")
+
+import run_artifacts as ra  # noqa: E402
 
 
 def fail(msg, out=""):
@@ -40,8 +45,25 @@ def main():
     storyboard = args.storyboard
     slug = os.path.splitext(os.path.basename(storyboard))[0]
     output = args.output or f"output/_preview_{slug}.mp4"
-    # 目录口径与 make_video run_preview 一致：相对路径挂 ROOT 下
-    check_dir = args.preview_dir or os.path.join(ROOT, "_build", "preview", slug)
+    # 目录口径与 make_video 一致（#22）：run_key = 分镜字节 + style + motion 开关
+    if args.preview_dir:
+        check_dir = args.preview_dir
+    else:
+        with open(
+            storyboard if os.path.isabs(storyboard) else os.path.join(ROOT, storyboard),
+            encoding="utf-8",
+        ) as f:
+            _tpl = json.load(f)
+        style_name = args.style or _tpl.get("style", "teaching")
+        motion_on = (not args.no_motion) and (_tpl.get("motion", True) is not False)
+        rkey = ra.run_key(
+            storyboard if os.path.isabs(storyboard) else os.path.join(ROOT, storyboard),
+            style_name,
+            motion_on,
+        )
+        check_dir = ra.preview_dir(
+            ra.run_dir(ROOT, slug, style_name, rkey)
+        )
     if not os.path.isabs(check_dir):
         check_dir = os.path.join(ROOT, check_dir)
 

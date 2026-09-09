@@ -7,13 +7,14 @@
 退出码：0=OK 1=PREFLIGHT 2=PREVIEW 3=RENDER 4=VERIFY（含用法错误=1）。
 stdout 末段为固定四字段回传：status / artifact / verify / diagnostic；
 OK 路径另加一行 `steps:`（#19：各步执行痕迹，字段只增不改，失败路径行为不变）。
-并行换皮（#18）：preview 目录按解析后的 style 隔离为 `_build/preview/<slug>__<style>/`，同 slug 多 worker 不再互踩。
+产物归属（#22）：preview 与加工音轨按 run 目录隔离（run_key = 分镜字节 +
+style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker 并行互踩
+不再可能；raw 旁白仍共享 `_build/<slug>/`（换皮复用）。verify 传相同的
+--style/--no-motion 以精确重定位本次运行。
 """
 
 import argparse
-import json
 import os
-import re
 import subprocess
 import sys
 
@@ -100,15 +101,9 @@ def main():
         sys.exit(1)
 
     # Step 2 preview：独立跑只为错误分类（全渲内部本有预览闸门）。
-    # preview 内容随 style 变（字体/间距→溢出结果不同），故按 style 隔离目录；
-    # 音频缓存与 style 无关，共享 _build/<slug>/ 安全（同内容 + 原子写，见 #18）
-    with open(
-        sb if os.path.isabs(sb) else os.path.join(ROOT, sb), encoding="utf-8"
-    ) as f:
-        style_key = args.style or json.load(f).get("style") or "teaching"
-    style_key = re.sub(r"[^\w.-]", "_", str(style_key))
-    prev_dir = os.path.join("_build", "preview", f"{slug}__{style_key}")
-    render_options = ["--preview-dir", prev_dir]
+    # 预览/音轨目录由 run_key 决定（#22）：分镜字节+style+motion 开关不同即隔离，
+    # 无需 worker 再自算 --preview-dir；raw 旁白缓存与 style 无关，共享安全（#18）
+    render_options = []
     if args.style:
         render_options += ["--style", args.style]
     if args.no_motion:
@@ -140,8 +135,13 @@ def main():
         )
         sys.exit(3)
 
-    # Step 4 verify
+    # Step 4 verify：传与渲染相同的 --style/--no-motion，精确重定位本次 run（#22）
     cmd = ["scripts/worker_verify.py", sb, out]
+    if args.style:
+        cmd.append("--style")
+        cmd.append(args.style)
+    if args.no_motion:
+        cmd.append("--no-motion")
     if args.reuse_audio:
         cmd.append("--expect-reuse-audio")
     rc, log4 = run_script(cmd)

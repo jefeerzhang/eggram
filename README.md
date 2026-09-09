@@ -86,6 +86,7 @@ eggram/
 ├── examples/                    # 分镜样例（3 个 demo：语法 / 经管 / 概念讲解）
 ├── scripts/
 │   ├── storyboard_gate.py       # 分镜闸门唯一规则源（校验 + 布局选择 + 页面准备）
+│   ├── run_artifacts.py         # 单次渲染产物归属（run 目录：预览+加工音轨+manifest）
 │   ├── make_video.py            # 渲染管线：闸门 → 预览 → TTS → 截帧 → ffmpeg
 │   └── validate_storyboard.py   # 独立闸门校验（与渲染同一规则，不跑 TTS）
 ├── tests/                       # 回归测试（test_make_video.py，pytest）

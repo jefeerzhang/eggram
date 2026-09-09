@@ -31,6 +31,24 @@
 
 `--reuse-audio` 复用 raw，每次仍跑 prepare。成片后核对实测时长 ≈ Σ(旁白+hold+尾垫)。
 
+## 产物归属（run 目录，#22）
+
+一次渲染 = 一个 run：`run_key = sha256(分镜文件字节 + style + motion 开关)[:10]`，
+目录 `_build/runs/<slug>__<style>__<run_key>/`（`scripts/run_artifacts.py`）：
+
+- `preview/`：本次预览截图 + `overflow.json`
+- `audio/`：本次**加工音轨** `s{i}_{fp}.wav`（随 hold/fps 变化，不属于共享缓存）
+- `manifest.json`：本次产物清单（音轨集合、时长、fps、mp4 路径）
+
+分工：**raw 可共享**（`_build/<slug>/`，旁白+音色指纹，换皮复用），**加工音轨归
+本次 run**——同 slug 不同来源、同旁白不同 hold/fps 的并行运行各写各的 run 目录，
+互不覆盖；同配置写同一路径靠原子写保证读方只见完整文件。
+
+验收（`worker_verify.py`）按相同口径重算 run_key 精确重定位 run、用 manifest 的
+本次实际音轨集合独立测量（±5% 双向容差）；manifest 缺失时回退旧版共享音轨
+`_build/<slug>/s{i}_{fp}.wav`（兼容迁移前产物）。正常/失败退出都不清理任何
+run 目录或历史产物。
+
 ## Done when
 
 - 句首句尾听得见完整字；练习提问不被淡入吃掉

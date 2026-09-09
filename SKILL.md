@@ -139,7 +139,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 字段/高亮色 | [`docs/json-schema.md`](docs/json-schema.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
 | CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
-| 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight/preview/verify.py`；契约 `.scratch/render-worker/` |
+| 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight/preview/verify.py`；产物归属 `scripts/run_artifacts.py`（run 目录：preview+加工音轨+manifest）；契约 `.scratch/render-worker/` |
 | 闸门规则 / 教学文本转义 | `scripts/storyboard_gate.py`（`prepare_storyboard` / `validate_storyboard` / `validate_layouts`）+ `templates/layout-*.html`；`make_video.py` re-export 兼容 |
 | 独立校验（不跑 TTS） | `py scripts/validate_storyboard.py <分镜.json>`（与渲染同一闸门，exit 2 = 失败） |
 | 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |

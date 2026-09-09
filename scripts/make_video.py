@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.request
 
+import run_artifacts as ra  # noqa: E402  单次渲染产物归属（run_key/manifest）
 from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker 消费 mv.*
     KIND_BADGE,
     KIND_MOTION,
@@ -314,7 +315,7 @@ def build_parser():
     p.add_argument(
         "--preview-dir",
         default=None,
-        help="预览截图/溢出报告目录（缺省 _build/preview/<slug>/；并行换皮按 style 隔开）",
+        help="预览截图/溢出报告目录（缺省 run 目录 preview/；显式指定可覆盖）",
     )
     return p
 
@@ -344,9 +345,17 @@ def main():
     FPS = int(prep["fps"])
     style, W, H = prep["style"], prep["W"], prep["H"]
     scenes = tpl["scenes"]
+    # 单次运行产物归属（#22）：run 目录拥有本次 preview + 加工音轨 + manifest；
+    # 可共享的 raw 旁白仍在 _build/<slug>/（旁白+音色指纹，style 不参与）
+    slug = os.path.splitext(os.path.basename(tpl_path))[0]
+    rkey = ra.run_key(tpl_path, prep["style_name"], motion_enabled)
+    rdir = ra.run_dir(ROOT, slug, prep["style_name"], rkey)
     print(
         f"   style={prep['style_name']} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
     )
+    print(f"   run={rdir}")
+    preview_out = args.preview_dir or ra.preview_dir(rdir)
+    os.makedirs(preview_out, exist_ok=True)
 
     # 浏览器解析：preview 与成片共用同一结果；候选全缺时在 TTS 前给出可执行提示
     try:
@@ -365,7 +374,7 @@ def main():
     # 预览闸门：缩略图 + 溢出；--preview 到此结束
     print("1/4 预览截图与溢出...")
     preview_rc = run_preview(
-        tpl_path, scenes, style, W, H, motion_enabled, browser, args.preview_dir
+        tpl_path, scenes, style, W, H, motion_enabled, browser, preview_out
     )
     if args.preview:
         sys.exit(preview_rc)
@@ -375,12 +384,17 @@ def main():
 
     print("2/4 生成配音..." + (" (reuse-audio)" if args.reuse_audio else ""))
     wavs, durs, frame_counts, narr_frames_list = [], [], [], []
+    audio_out = ra.audio_dir(rdir)
+    os.makedirs(audio_out, exist_ok=True)
     lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
     cache_dir = os.path.join(ROOT, "_build", lesson_key)
     os.makedirs(cache_dir, exist_ok=True)
+    scene_meta = []
     for i, sc in enumerate(scenes):
         sc_voice = resolve_voice(sc, tpl)
-        raw_path, wav_path = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
+        raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
+        fp = _audio_fingerprint(sc["narrate"], sc_voice)
+        wav_path = ra.scene_wav(rdir, i, fp)
         hold = float(sc.get("hold", 0.0))
         if args.reuse_audio and _cache_hit(raw_path, sc_voice, sc["narrate"]):
             raw_pcm, rate = read_wav_pcm(raw_path)
@@ -413,6 +427,20 @@ def main():
         durs.append(dur)
         frame_counts.append(n_frames)
         narr_frames_list.append(narr_frames)
+        scene_meta.append(
+            {
+                "i": i,
+                "voice": sc_voice,
+                "narrate": sc["narrate"],
+                "fp": fp,
+                "raw": os.path.abspath(raw_path),
+                "wav": os.path.abspath(wav_path),
+                "duration": dur,
+                "frames": n_frames,
+                "narr_frames": narr_frames,
+                "hold": hold,
+            }
+        )
         print(
             f"   scene {i} [{resolve_kind(sc)}/{_motion_display_name(resolve_motion(sc, motion_enabled))}]: "
             f"{dur:.2f}s ({n_frames}f, hold={hold:.1f}, {src})"
@@ -533,6 +561,24 @@ def main():
         )
     elif actual_dur is not None:
         print(f"   OK: {actual_dur:.2f}s ≈ {expected_dur:.2f}s")
+    # 本次运行产物清单（#22）：verify 用它拿「本次实际音轨集合」，精确重定位
+    ra.write_manifest(
+        rdir,
+        {
+            "schema": ra.MANIFEST_SCHEMA,
+            "run_key": rkey,
+            "slug": slug,
+            "style_name": prep["style_name"],
+            "motion_enabled": motion_enabled,
+            "fps": FPS,
+            "W": W,
+            "H": H,
+            "storyboard": os.path.abspath(tpl_path),
+            "mp4": os.path.abspath(out),
+            "expected_duration": expected_dur,
+            "scenes": scene_meta,
+        },
+    )
     print(f"DONE -> {out}  ({os.path.getsize(out)} bytes)")
 
 
@@ -596,19 +642,14 @@ def _ffprobe_duration(path):
     return None
 
 
-def run_preview(
-    tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir=None
-):
-    """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。"""
-    lesson_key = os.path.splitext(os.path.basename(tpl_path))[0]
-    if preview_dir:
-        out_dir = (
-            preview_dir
-            if os.path.isabs(preview_dir)
-            else os.path.join(ROOT, preview_dir)
-        )
-    else:
-        out_dir = os.path.join(ROOT, "_build", "preview", lesson_key)
+def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir):
+    """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。
+
+    preview_dir 由调用方给定（缺省为 run 目录的 preview/，#22 产物归属）。
+    """
+    out_dir = (
+        preview_dir if os.path.isabs(preview_dir) else os.path.join(ROOT, preview_dir)
+    )
     os.makedirs(out_dir, exist_ok=True)
     print(f"   → {out_dir}")
     report = []
@@ -627,7 +668,8 @@ def run_preview(
             # 缩略图取 t=0（起点画面），避免截到中间态
             apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
             png = os.path.join(out_dir, f"s{i}.png")
-            page.screenshot(path=png, type="png", full_page=False)
+            # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
+            ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
             # 溢出探测覆盖动效可达状态：none 只测静态；其余按各动效自身窗口采样 0..1
             seen, findings = set(), []
             for elapsed, duration in _motion_probe_states(motion):
@@ -655,8 +697,9 @@ def run_preview(
             )
         b.close()
     report_path = os.path.join(out_dir, "overflow.json")
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    ra.atomic_write_bytes(
+        report_path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
+    )
     if gate_errs:
         print("PREVIEW GATE FAILED:")
         for e in gate_errs:
