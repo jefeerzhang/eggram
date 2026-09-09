@@ -794,6 +794,83 @@ def test_formula_motion_vars_zero_duration():
     assert v["card_y"] == 8
 
 
+def _matrix(css_transform):
+    """'matrix(a, b, c, d, tx, ty)' → 六个浮点数。"""
+    return [float(x) for x in css_transform[css_transform.index("(") + 1 : -1].split(",")]
+
+
+def test_formula_motion_css_hooks_present():
+    for token in ("--m-card-y", "--m-card-elev", "--m-frac-bar", "--m-part-on", "--m-formula-hl"):
+        assert token in sg.MOTION_CSS, token
+    assert ".formula-card" in sg.MOTION_CSS
+    assert ".formula-bar" in sg.MOTION_CSS
+    assert ".step[data-part-id]" in sg.MOTION_CSS
+    assert "[data-formula-main]" in sg.MOTION_CSS
+    # 钩子只服务 formula 页：其它 layout 不引入这些类名，避免误伤
+    raw = open(
+        os.path.join(sg.TEMPLATE_DIR, "layout-rule-formula.html"), encoding="utf-8"
+    ).read()
+    assert "formula-card" in raw and "formula-bar" in raw
+
+
+def test_browser_formula_vars_drive_computed_style(browser):
+    sc = {
+        "kind": "rule", "layout_variant": "formula", "header": "H", "sub": "s",
+        "body": "B", "narrate": "N",
+        "formula": {
+            "num": "A", "den": "B",
+            "parts": [
+                {"id": "num", "label": "1", "text": "t1"},
+                {"id": "den", "label": "2", "text": "t2"},
+            ],
+        },
+    }
+    parts = sc["formula"]["parts"]
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+
+        def snapshot(elapsed):
+            sg.apply_motion_css_vars(
+                page, 1.0, 1.0, 0.0, sg.formula_motion_vars(parts, elapsed, 1.0)
+            )
+            return {
+                "card": _matrix(page.locator(".formula-card").evaluate(
+                    "el => getComputedStyle(el).transform")),
+                "bar": _matrix(page.locator(".formula-bar").evaluate(
+                    "el => getComputedStyle(el).transform")),
+                "steps": page.locator(".step[data-part-id]").evaluate_all(
+                    "els => els.map(e => parseFloat(getComputedStyle(e).opacity))"),
+                "main": _matrix(page.locator("[data-formula-main]").evaluate(
+                    "el => getComputedStyle(el).transform")),
+            }
+
+        # 入场中（u=0.05）：卡未落位、分式线宽度 0、parts 全暗、主式不放大
+        e = snapshot(0.05)
+        assert e["card"][5] == pytest.approx(8 * (1 - sg.ease_out_cubic(1 / 3)), abs=0.01)
+        assert e["bar"][0] == pytest.approx(0.0, abs=1e-6)
+        assert e["steps"] == [pytest.approx(0.45)] * 2
+        assert e["main"][0] == pytest.approx(1.0)
+        # 第一个 part 点亮（u=0.50）：卡落位、分式线满宽、仅 num 亮、parts 阶段主式不放大
+        p = snapshot(0.50)
+        assert p["card"][5] == pytest.approx(0.0, abs=1e-6)
+        assert p["bar"][0] == pytest.approx(1.0)
+        assert p["steps"] == [pytest.approx(1.0), pytest.approx(0.45)]
+        assert p["main"][0] == pytest.approx(1.0)
+        # 主式阶段（u=0.25）：主式放大一档，parts 仍全暗
+        m = snapshot(0.25)
+        assert m["main"][0] > 1.0
+        assert m["steps"] == [pytest.approx(0.45)] * 2
+        # 交回非公式页语义（formula=None）：一切回到末态，不留残值
+        sg.apply_motion_css_vars(page, 1.0, 1.0, 0.0)
+        reset = page.locator(".step[data-part-id]").evaluate_all(
+            "els => els.map(e => parseFloat(getComputedStyle(e).opacity))"
+        )
+        assert reset == [pytest.approx(1.0)] * 2
+    finally:
+        page.close()
+
+
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
 
 
