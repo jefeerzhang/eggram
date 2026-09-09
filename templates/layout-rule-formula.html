@@ -1,4 +1,5 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0;box-sizing:border-box}
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
 body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__BG2__ 100%);font-family:__FONT__;color:__INK__;overflow:hidden}
 .stage{position:relative;width:100%;height:100%;padding:36px 60px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center}
 .hd{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:6px}
@@ -8,10 +9,13 @@ body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__
 .sub{font-size:__SUB_SIZE__px;color:__INK_SUB__;letter-spacing:.5px;max-width:920px;margin-bottom:12px}
 .formula-card{width:100%;max-width:960px;background:__SURFACE__;border:1px solid __ACCENT__;border-radius:22px;padding:28px 48px;box-shadow:0 4px 20px rgba(0,0,0,0.22);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
 .formula{font-size:calc(__BODY_SIZE__px * 1.15);line-height:1.5;font-weight:700;text-align:center;letter-spacing:1px}
-.breakdown{display:flex;gap:20px;width:100%;max-width:960px;flex:1;min-height:0}
-.step{flex:1;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:18px;padding:16px 20px;box-shadow:0 2px 12px rgba(0,0,0,0.12);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
-.step-num{width:28px;height:28px;border-radius:50%;background:__ACCENT__;color:__BG__;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center}
-.step-text{font-size:calc(__BODY_SIZE__px * 0.55);line-height:1.45;font-weight:500;text-align:center}
+.formula-frac{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;max-width:720px}
+.formula-num,.formula-den{font-size:calc(__BODY_SIZE__px * 1.25);line-height:1.35;font-weight:700;text-align:center}
+.formula-bar{width:100%;max-width:420px;height:3px;background:__ACCENT__;border-radius:2px}
+.breakdown{display:flex;flex-wrap:wrap;gap:20px;width:100%;max-width:960px;flex:1;min-height:0;justify-content:center}
+.step{flex:1 1 200px;max-width:440px;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:18px;padding:16px 20px;box-shadow:0 2px 12px rgba(0,0,0,0.12);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.step-num{min-width:28px;height:28px;padding:0 8px;border-radius:999px;background:__ACCENT__;color:__BG__;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.step-text,.part-text{font-size:calc(__BODY_SIZE__px * 0.55);line-height:1.45;font-weight:500;text-align:center}
 .hl{color:__ACCENT__;font-weight:800}
 .err{color:__WRONG__;font-weight:800}
 </style></head><body>
@@ -19,10 +23,7 @@ body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__
   <div class="hd"><div class="title">__HEADER__</div><div class="badge">__BADGE__</div></div>
   <div class="rule"></div>
   <div class="sub">__SUB__</div>
-  <div class="formula-card"><div class="formula">__BODY__</div></div>
-  <div class="breakdown">
-    <div class="step"><div class="step-num">1</div><div class="step-text">__ZH__</div></div>
-    <div class="step"><div class="step-num">2</div><div class="step-text">__BADGE__</div></div>
-  </div>
+  <div class="formula-card">__FORMULA_MAIN__</div>
+  __PARTS__
 </div>
 </body></html>
