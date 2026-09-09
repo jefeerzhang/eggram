@@ -336,11 +336,19 @@ def _motion_display_name(effects):
     return "+".join(e["type"] for e in effects)
 
 
-# _escape 内部占位：NUL 包裹，先剥原文 NUL，故与教学正文不碰撞；
-# 禁用下划线（后续 .replace("_") 会转义）；html.escape 不改动 \x00。
-_ESC_BR = "\x00br\x00"
-_ESC_SUBO, _ESC_SUBC = "\x00subo\x00", "\x00subc\x00"
-_ESC_SUPO, _ESC_SUPC = "\x00supo\x00", "\x00supc\x00"
+# 白名单标签：在"已全部转义"的文本上按其转义形态还原。带属性的标签
+# （如 <sub onclick=x>）转义后对不上模式，因此留在文本里。
+_WHITELIST_TAGS = (
+    (re.compile(r"&lt;br\s*/?&gt;", re.IGNORECASE), "<br>"),
+    (
+        re.compile(r"&lt;sub&gt;(.*?)&lt;/sub&gt;", re.IGNORECASE | re.DOTALL),
+        r"<sub>\1</sub>",
+    ),
+    (
+        re.compile(r"&lt;sup&gt;(.*?)&lt;/sup&gt;", re.IGNORECASE | re.DOTALL),
+        r"<sup>\1</sup>",
+    ),
+)
 
 
 def _escape(text):
@@ -348,31 +356,12 @@ def _escape(text):
     避免内容被后续槽二次解释或被误判为残留占位符。
     换行处理：JSON 中的 \\n、真实换行、手写 <br> 均统一转为 HTML <br>。
     白名单标签：<br> / <sub> / <sup> 透传（公式上下标需求），其它 <...> 仍 escape。
-    占位符用 NUL 包裹且先剥原文 NUL，避免 `@BR@` 这类字面串被误还原成标签。"""
-    s = str(text).replace("\x00", "")
-    # 1. 先把白名单标签提为占位符（避免被 escape 干掉）
-    s = re.sub(r"<br\s*/?>", _ESC_BR, s, flags=re.IGNORECASE)
-    s = re.sub(
-        r"<sub>(.*?)</sub>",
-        _ESC_SUBO + r"\1" + _ESC_SUBC,
-        s,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    s = re.sub(
-        r"<sup>(.*?)</sup>",
-        _ESC_SUPO + r"\1" + _ESC_SUPC,
-        s,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    # 2. 统一换行：JSON 转义 \\n、真实换行、手写 <br> 均归一
-    s = s.replace("\\n", "\n")
-    s = s.replace("\n", _ESC_BR)
-    # 3. escape 其它特殊字符 + 下划线
-    s = html.escape(s, quote=True).replace("_", "&#95;")
-    # 4. 还原白名单标签
-    s = s.replace(_ESC_BR, "<br>")
-    s = s.replace(_ESC_SUBO, "<sub>").replace(_ESC_SUBC, "</sub>")
-    s = s.replace(_ESC_SUPO, "<sup>").replace(_ESC_SUPC, "</sup>")
+    正文里的 @BR@ 或字面 &lt;sub&gt; 都不会被还原成真标签——还原只认转义后的标签形态。
+    """
+    s = str(text).replace("\x00", "").replace("\\n", "\n")
+    s = html.escape(s, quote=True).replace("_", "&#95;").replace("\n", "<br>")
+    for pattern, tag in _WHITELIST_TAGS:
+        s = pattern.sub(tag, s)
     return s
 
 
