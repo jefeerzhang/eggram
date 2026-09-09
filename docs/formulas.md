@@ -1,0 +1,73 @@
+<!-- markdownlint-disable MD033 -->
+# 公式渲染
+
+教学微课里常见数学/金融公式：分子分母、上下标、希腊字母、特殊符号。
+Storyboard JSON 的 `body` / `sub` / `header` 字段怎么写这些。
+
+## 渲染管线
+
+`scripts/storyboard_gate.py` 的 `_escape()` 是教学文本到 HTML 的唯一入口。
+流程：先按白名单提取标签为占位符（避免被 escape 干掉）→ escape 其它特殊字符
+→ 还原占位符为 HTML。
+
+## 白名单标签（透传）
+
+| 标签 | 用途 | 例子 | 渲染 |
+| --- | --- | --- | --- |
+| `<br>` / `<br/>` / `<br />` | 换行 | `"A<br>B"` | A<br>B |
+| `<sub>...</sub>` | 下标 | `"R<sub>p</sub>"` | R<sub>p</sub> |
+| `<sup>...</sup>` | 上标 | `"X<sup>2</sup>"` | X<sup>2</sup> |
+
+**白名单外**的 `<...>` 仍被 escape 为 `&lt;...&gt;` 按字面显示。
+这是 XSS 防护——分镜 JSON 是用户自管内容，但不能注入任意 HTML。
+
+## 避坑
+
+### ❌ 直接写 `R_p` 不行
+
+`_escape` 末尾有 `.replace("_", "&#95;")`，把下划线转成实体，
+目的是中和 `__...__` 槽位 token（避免内容里的 `__FOO__` 被渲染管线误判为残留占位符）。
+副作用：用户写的 `R_p` 也会被转成 `R&#95;p`，视觉上变成 `R_p`（带下划线连字符，非下标）。
+
+**正确**：用 `<sub>` 标签。
+
+### ❌ 占位符不能带下划线
+
+如果你将来扩展 `_escape` 加新占位符（例如 `@FRAC@`），
+**禁用下划线**作为占位符命名。`@FRAC_OPEN@` 会被 `.replace("_")` 误伤成 `@FRAC&#95;OPEN@`。
+
+参考实现见 `scripts/storyboard_gate.py` 的 `_escape()`。
+
+### ❌ 不可用 `<script>` 等任意标签
+
+白名单外标签一律 escape。`<script>alert(1)</script>` 会显示成文本，不会执行。
+
+## 例子
+
+```json
+{
+  "kind": "rule",
+  "header": "夏普比率",
+  "sub": "(R<sub>p</sub> − R<sub>f</sub>) / σ<sub>p</sub>",
+  "body": "**分子 = 超额收益（R<sub>p</sub> − R<sub>f</sub>）**<br>**分母 = 总风险（σ<sub>p</sub>）**"
+}
+```
+
+渲染结果：`R_p`、`σ_p` 以下标形式显示，`σ` 用希腊字母，`**` 部分按对应 style token
+高亮（rule 用 accent 色）。
+
+## 什么时候需要扩展
+
+如果白名单不够用（例如需要分式 `\frac`、根号 `\sqrt`、求和 `\sum`），两条路：
+
+1. **加白名单标签**（最小改）：在 `_escape` 仿照 `<sub>` 处理 `<span class="frac">` 等，
+   在 `templates/layout-*.html` 加 CSS 排版。
+2. **引入 KaTeX**（重量级）：违背 motion.md 的 CSS 轻动效原则，谨慎。
+
+当前选择：白名单 `<sub>`/`<sup>` 覆盖 90% 金融/理公式需求。
+
+## 相关文件
+
+- [`scripts/storyboard_gate.py`](../scripts/storyboard_gate.py) — `_escape()` 实现
+- [`docs/json-schema.md`](json-schema.md) — body / sub / header 字段定义
+- [`docs/motion.md`](motion.md) — 动画与样式 token

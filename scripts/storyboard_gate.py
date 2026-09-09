@@ -312,15 +312,33 @@ def _motion_display_name(effects):
 def _escape(text):
     """把教学字段当纯文本：& < > \" ' 按字面显示；下划线转为实体以中和 __...__ 槽位 token，
     避免内容被后续槽二次解释或被误判为残留占位符。
-    换行处理：JSON 中的 \\n、真实换行、手写 <br> 均统一转为 HTML <br>。"""
+    换行处理：JSON 中的 \\n、真实换行、手写 <br> 均统一转为 HTML <br>。
+    白名单标签：<br> / <sub> / <sup> 透传（公式上下标需求），其它 <...> 仍 escape。
+    注意：占位符禁用下划线（后续 .replace("_") 会转义）。"""
     s = str(text)
-    # 1. 先统一换行：JSON 转义 \\n、真实换行、手写 <br> / <br/> / <br /> 均归一
+    # 1. 先把白名单标签提为占位符（避免被 escape 干掉）
+    s = re.sub(r"<br\s*/?>", "@BR@", s, flags=re.IGNORECASE)
+    s = re.sub(
+        r"<sub>(.*?)</sub>",
+        r"@SUBOPEN@\1@SUBCLOSE@",
+        s,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    s = re.sub(
+        r"<sup>(.*?)</sup>",
+        r"@SUPOPEN@\1@SUPCLOSE@",
+        s,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # 2. 统一换行：JSON 转义 \\n、真实换行、手写 <br> 均归一
     s = s.replace("\\n", "\n")
-    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
-    # 2. 保护 <br>：先提取，再 escape，最后还原
-    s = s.replace("\n", "@@BR@@")
+    s = s.replace("\n", "@BR@")
+    # 3. escape 其它特殊字符 + 下划线
     s = html.escape(s, quote=True).replace("_", "&#95;")
-    s = s.replace("@@BR@@", "<br>")
+    # 4. 还原白名单标签
+    s = s.replace("@BR@", "<br>")
+    s = s.replace("@SUBOPEN@", "<sub>").replace("@SUBCLOSE@", "</sub>")
+    s = s.replace("@SUPOPEN@", "<sup>").replace("@SUPCLOSE@", "</sup>")
     return s
 
 
@@ -710,8 +728,15 @@ def validate_rendered_html(html, scene_index):
 _OVERFLOW_SELECTORS_BY_KIND = {
     "title": [".big", ".sub"],
     "rule": [
-        ".title", ".badge", ".sub", ".body", ".formula", ".step-text",
-        ".example-text", ".hl", ".err",
+        ".title",
+        ".badge",
+        ".sub",
+        ".body",
+        ".formula",
+        ".step-text",
+        ".example-text",
+        ".hl",
+        ".err",
     ],
     "diagram": [".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err"],
     "example": [".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".err"],

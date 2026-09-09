@@ -26,7 +26,7 @@
 | motion | | 字符串或 effects 数组，见 [`motion.md`](motion.md) |
 | header | ✅ | 「学习者此刻做什么」 |
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
-| body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`** |
+| body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`**；公式上下标用 `<sub>`/`<sup>`，详见 [`formulas.md`](formulas.md) |
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |

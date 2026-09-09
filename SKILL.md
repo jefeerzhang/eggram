@@ -137,6 +137,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 动效幅度/默认 | [`docs/motion.md`](docs/motion.md) + `make_video.py` |
 | 卡顿/hold/拼接 | [`docs/audio.md`](docs/audio.md) + `prepare_scene_audio` |
 | 字段/高亮色 | [`docs/json-schema.md`](docs/json-schema.md) |
+| *公式渲染* / `R_p` 下标 | [`docs/formulas.md`](docs/formulas.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
 | CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
 | 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight/preview/verify.py`；产物归属与输出目标占用 `scripts/run_artifacts.py`（run 目录：preview+加工音轨+manifest；自动命名+`<output>.lock`）；契约 `.scratch/render-worker/` |
