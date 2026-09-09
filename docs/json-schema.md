@@ -26,7 +26,8 @@
 | motion | | 字符串或 effects 数组，见 [`motion.md`](motion.md) |
 | header | ✅ | 「学习者此刻做什么」 |
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
-| body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`**；公式上下标用 `<sub>`/`<sup>`，详见 [`formulas.md`](formulas.md) |
+| body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`**；公式上下标用 `<sub>`/`<sup>`，详见 [`formulas.md`](formulas.md)；`rule` + `layout_variant: "formula"` 且有合法 `formula` 对象时可空 |
+| formula | rule + layout_variant formula | 对象：`display` / `num` / `den` / `parts[]`；见 [`formulas.md`](formulas.md) |
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
@@ -56,7 +57,7 @@
 | kind | 变体 ID | 文件 | 适用场景 |
 | --- | --- | --- | --- |
 | rule | `"side"` | layout-rule-side.html | 左规则右示例，需要即时示范 |
-| rule | `"formula"` | layout-rule-formula.html | 上公式下拆解，复杂数学公式 |
+| rule | `"formula"` | layout-rule-formula.html | 上公式下拆解，复杂数学公式；推荐结构化 `formula` 对象，仅 `body` 仍兼容 |
 | example | `"side"` | layout-example-side.html | 左正确右易错对比 |
 
 省略 `layout_variant` → 使用默认 layout。变体文件不存在时自动回退默认。

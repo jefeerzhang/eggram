@@ -21,6 +21,40 @@ Storyboard JSON 的 `body` / `sub` / `header` 字段怎么写这些。
 **白名单外**的 `<...>` 仍被 escape 为 `&lt;...&gt;` 按字面显示。
 这是 XSS 防护——分镜 JSON 是用户自管内容，但不能注入任意 HTML。
 
+## 结构化 formula（推荐）
+
+`kind: "rule"` 且 `layout_variant: "formula"` 时，用顶层 `formula` 对象描述主式与分项拆解（分式排版 + `parts` 槽位），替代把整式塞进扁平 `body`。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `display` | 条件\* | 单行整式（可 `<sub>`/`<sup>`/`**`） |
+| `num` | 否 | 分子文本 |
+| `den` | 否 | 分母文本 |
+| `parts` | 推荐 | 分项数组，长度 2–4；每项须 `id` / `label` / `text`（`id` 页内唯一） |
+
+\* `num` 与 `den` 都有则可省略 `display`（画面以分式为主）；否则 `display` 非空。
+
+```json
+{
+  "kind": "rule",
+  "layout_variant": "formula",
+  "header": "夏普比率",
+  "sub": "风险调整后收益",
+  "formula": {
+    "num": "R<sub>p</sub> − R<sub>f</sub>",
+    "den": "σ<sub>p</sub>",
+    "parts": [
+      {"id": "num", "label": "分子", "text": "超额收益（组合收益 − 无风险利率）"},
+      {"id": "den", "label": "分母", "text": "组合收益的波动 σ<sub>p</sub>"}
+    ]
+  },
+  "narrate": "夏普比率等于超额收益除以总风险。"
+}
+```
+
+**兼容：** 无 `formula` 时行为与现网一致——仍要求非空 `body`，主式来自 `body`，分项走旧 `zh`/badge 双步。  
+**并存警告：** 同时提供 `formula` 与非空 `body` 时，*闸门* 发出 warning「以 formula 为准，body 忽略」，画面只读 `formula`。
+
 ## 避坑
 
 ### ❌ 直接写 `R_p` 不行
