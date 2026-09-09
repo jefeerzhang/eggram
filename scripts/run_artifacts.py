@@ -14,10 +14,6 @@
 输出目标占用（#23）：worker 省略 output 时按 (分镜, 最终皮肤) 自动命名；
 `acquire_target` 用 `<output>.lock`（O_EXCL + 心跳保活）保护同一目标不被
 两个活动运行同时写，进程死亡后锁过期可接管。不删除历史成片。
-
-run 目录占用：`acquire_run` 用 `<rdir>.lock` 保护同 run_key 的 preview/audio/
-manifest 不被并行写交错；完整 worker 在父进程持锁期间设 EGGRAM_RUN_OWNED=
-abspath(rdir)，子进程 make_video 跳过重复加锁。
 """
 
 import hashlib
@@ -198,22 +194,14 @@ class _TargetLock:
             pass
 
 
-def acquire_run(rdir, storyboard="", style_name=""):
-    """占用 run 目录：锁文件 `<rdir>.lock`（与目录并列），语义同 acquire_target。
-
-    同 run_key 的并行运行（例如同配置不同 --output）会在写 preview/音轨前被拒。
-    """
-    return acquire_target(rdir, storyboard=storyboard, style_name=style_name)
-
-
 def acquire_target(output, storyboard="", style_name=""):
-    """占用输出目标或 run 路径：O_EXCL 创建 `<path>.lock`（含 pid/token/started）。
+    """占用输出目标：O_EXCL 创建 `<output>.lock`（含 pid/token/started）。
 
     锁由心跳保活（mtime 每几秒刷新）；已存在的锁超过 LOCK_STALE_SECONDS
     无心跳视为失效并接管（打印接管说明），否则抛 TargetOccupied。
     """
     lock = f"{output}.lock"
-    os.makedirs(os.path.dirname(os.path.abspath(lock)) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(lock)), exist_ok=True)
     for _ in range(2):
         token = uuid.uuid4().hex
         info = {

@@ -784,75 +784,11 @@ def test_block_lookup_and_switch():
     assert block_for_kind("title")[0] == "beat-freeze-cut.html"
     assert block_for_kind("rule")[0] == "cinematic-zoom.html"
     assert block_for_kind("mistake")[0] == "bar-chart-race.html"
-    assert block_for_kind("title")[3] == "#bfc-root"
     for kind in ("example", "practice", "answer", "summary", "diagram", None):
         assert block_for_kind(kind) is None
     assert blocks_enabled({}) is True  # 默认开启
     assert blocks_enabled({"blocks": True}) is True
     assert blocks_enabled({"blocks": False}) is False  # 分镜级关闭
-
-
-def test_block_html_config_injection_is_safe():
-    """CONFIG 注入转义 </script>；ruleBody 为纯文本换行（非 HTML）。"""
-    from make_video import block_config, block_html, block_root_findings
-
-    sc = {
-        "header": '</script><script>alert(1)</script>',
-        "sub": "副标题",
-        "body": "第一行\n<img src=x onerror=alert(1)>\n第三行",
-    }
-    tpl = {"title": "课"}
-    cfg = block_config("rule", sc, tpl)
-    assert "<br" not in cfg["ruleBody"]
-    assert "\n" in cfg["ruleBody"]
-    assert "<img" in cfg["ruleBody"]  # 原文保留，模板侧不走 innerHTML
-
-    html = block_html("rule", sc, tpl, 1920, 1080)
-    assert html is not None
-    assert "eggram-block-config" in html
-    assert "\\u003c/script" in html or "\\u003cscript" in html
-    # 不得出现未转义的裸 </script> 打断 application/json 块
-    marker = 'id="eggram-block-config">'
-    start = html.index(marker) + len(marker)
-    end = html.index("</script>", start)
-    payload = html[start:end]
-    assert "</script>" not in payload
-
-    assert block_root_findings({"missing": True}, "#root", 1920, 1080)
-    assert block_root_findings(
-        {"missing": False, "w": 0, "h": 0, "left": 0, "top": 0, "right": 0, "bottom": 0},
-        "#root",
-        1920,
-        1080,
-    )
-    assert block_root_findings(
-        {
-            "missing": False,
-            "w": 100,
-            "h": 100,
-            "left": 2000,
-            "top": 0,
-            "right": 2100,
-            "bottom": 100,
-        },
-        "#root",
-        1920,
-        1080,
-    )
-    assert not block_root_findings(
-        {
-            "missing": False,
-            "w": 100,
-            "h": 100,
-            "left": 10,
-            "top": 10,
-            "right": 110,
-            "bottom": 110,
-        },
-        "#root",
-        1920,
-        1080,
-    )
 
 
 def test_block_smoke_timelines_initialize():

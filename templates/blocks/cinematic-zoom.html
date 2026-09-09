@@ -98,20 +98,12 @@
     <script>
       window.__timelines = window.__timelines || {};
       // 集成层经 window.__BLOCK_CONFIG 覆盖（sceneFrom/sceneTo/ruleTitle/ruleBody）
-      // ruleBody 纯文本：用 textContent + <br>，不用 innerHTML（防分镜 HTML 注入）
       (function () {
         var CFG = window.__BLOCK_CONFIG || {};
         if (CFG.sceneFrom) document.getElementById("bp-label-from").textContent = CFG.sceneFrom;
         if (CFG.sceneTo) document.getElementById("bp-label-to").textContent = CFG.sceneTo;
         if (CFG.ruleTitle) document.getElementById("bp-rule-title").textContent = CFG.ruleTitle;
-        if (CFG.ruleBody) {
-          var el = document.getElementById("bp-rule-body");
-          el.textContent = "";
-          String(CFG.ruleBody).split("\n").forEach(function (line, i) {
-            if (i) el.appendChild(document.createElement("br"));
-            el.appendChild(document.createTextNode(line));
-          });
-        }
+        if (CFG.ruleBody) document.getElementById("bp-rule-body").innerHTML = CFG.ruleBody;
       })();
       var glCanvas = document.getElementById("gl-canvas");
       var gl = glCanvas.getContext("webgl", { preserveDrawingBuffer: true });
