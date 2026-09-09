@@ -971,22 +971,14 @@ _OVERFLOW_SELECTORS_BY_KIND = {
     "answer": [".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".err"],
     "summary": [".sum", ".next", ".hl"],
 }
-# 兼容旧调用：未传 kind 时取所有选择器的并集。
-_OVERFLOW_SELECTORS = sorted(
-    {s for sels in _OVERFLOW_SELECTORS_BY_KIND.values() for s in sels}
-)
 
 
-def preview_overflow(page, W, H, kind=None):
+def preview_overflow(page, W, H, kind):
     """在已 set_content 的 page 上测关键槽是否溢出视口。返回 list[(selector, msg)]。
 
-    kind 提供时按 _OVERFLOW_SELECTORS_BY_KIND 取（精确匹配当前 layout 实际类名）；
-    未提供时取所有选择器并集（兼容旧调用）。
+    按 kind 取 _OVERFLOW_SELECTORS_BY_KIND，精确匹配该 layout 的实际类名。
     """
-    if kind is not None and kind in _OVERFLOW_SELECTORS_BY_KIND:
-        selectors = _OVERFLOW_SELECTORS_BY_KIND[kind]
-    else:
-        selectors = _OVERFLOW_SELECTORS
+    selectors = _OVERFLOW_SELECTORS_BY_KIND[kind]
     js = """([W, H, sels]) => {
         const out = [];
         for (const sel of sels) {
@@ -1016,8 +1008,6 @@ def _motion_probe_states(effects):
     """预览闸门探测的动效可达状态：[(elapsed_seconds, duration_seconds), ...]。
     none 只测静态；其余动效在其自身可达窗口（delay 后 1 秒内完成）按 0..1 网格采样。
     不依赖真实旁白时长——TTS 前的预览也能覆盖延迟动效的放大末态。"""
-    if isinstance(effects, str):  # 兼容旧调用
-        effects = [{"type": effects, "delay": 0}]
     states = [(0.0, 1.0)]
     for eff in effects:
         if eff.get("type", "none") == "none":

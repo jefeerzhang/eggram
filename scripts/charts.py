@@ -123,15 +123,22 @@ def _draw_axes(
 
 
 # ── 曲线图解 ─────────────────────────────────────────────────────────────────
-def _compute_default_points(fn, xmin, xmax, n=40):
+# fn 预设表达式 → 归一化形状 t∈[0,1] → y∈(0,1]；scale 由调用点乘
+_CURVE_FNS = {
+    "t^0.3": lambda t: t**0.3,
+    "1 - t": lambda t: 1.0 - t,
+    "sin": lambda t: math.sin(t * math.pi),
+    "log": lambda t: min(1.0, math.log1p(t * 4) / math.log1p(4)),
+}
+_CURVE_SAMPLES = 50
+
+
+def _compute_default_points(fn, xmin, xmax):
     """从函数推导点序列，fn: normalized t∈[0,1] → y"""
-    pts = []
-    for i in range(n + 1):
-        t = i / n
-        x = xmin + t * (xmax - xmin)
-        y = fn(t)
-        pts.append({"x": x, "y": y})
-    return pts
+    return [
+        {"x": xmin + i / _CURVE_SAMPLES * (xmax - xmin), "y": fn(i / _CURVE_SAMPLES)}
+        for i in range(_CURVE_SAMPLES + 1)
+    ]
 
 
 def _curve_band(pts, xmin, xmax, ymin, ymax, x_left, x_right):
@@ -185,22 +192,8 @@ def build_curve_svg(chart, colors):
     raw_pts = curve.get("points")
     if not raw_pts:
         scale = curve.get("fn_scale", 100)
-        fn_expr = curve.get("fn", "t^0.3")
-
-        def default_fn(t):
-            if fn_expr == "t^0.3":
-                return scale * (t**0.3)
-            elif fn_expr == "1 - t":
-                return scale * (1.0 - t)
-            elif fn_expr == "sin":
-                return scale * math.sin(t * math.pi)
-            elif fn_expr == "log":
-                import math as _m
-
-                return scale * min(1.0, _m.log1p(t * 4) / _m.log1p(4))
-            return scale * (1.0 - t)
-
-        raw_pts = _compute_default_points(default_fn, xmin, xmax, n=50)
+        fn = _CURVE_FNS.get(curve.get("fn", "t^0.3"), _CURVE_FNS["1 - t"])
+        raw_pts = _compute_default_points(lambda t: scale * fn(t), xmin, xmax)
 
     xticks = chart.get("xticks")
     yticks = chart.get("yticks")
