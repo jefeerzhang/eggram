@@ -1,7 +1,7 @@
 """worker_preview.py — render worker Step 2 预览闸门（GitHub issues #12/#18/#22）
 
 用法: py scripts/worker_preview.py examples/<slug>.json [output_path] [--preview-dir DIR]
-      [--style NAME] [--no-motion] [--browser PATH]
+      [--preview-token TOKEN] [--style NAME] [--no-motion] [--browser PATH]
 
 跑 make_video.py --preview，再核对截图齐全 + 溢出报告干净。
 全过 → stdout `PREVIEW_OK <n> frames`、exit 0；任一失败 → 诊断、exit 2（FAIL_AT_PREVIEW）。
@@ -37,6 +37,11 @@ def main():
         "output", nargs="?", default=None, help="缺省 output/_preview_<slug>.mp4"
     )
     ap.add_argument("--preview-dir", default=None, help="自定义预览截图目录")
+    ap.add_argument(
+        "--preview-token",
+        default=None,
+        help="worker run 归属标记（透传 make_video；预览结果只供同 token 复用）",
+    )
     ap.add_argument("--style", default=None)
     ap.add_argument("--no-motion", action="store_true")
     ap.add_argument("--browser", default=None)
@@ -69,6 +74,8 @@ def main():
 
     # 1) make_video --preview：exit 1=溢出，2=占位符闸门（均归 FAIL_AT_PREVIEW）
     cmd = [sys.executable, MAKE_VIDEO, storyboard, output, "--preview"]
+    if args.preview_token:
+        cmd += ["--preview-token", args.preview_token]
     if args.preview_dir:
         cmd += ["--preview-dir", args.preview_dir]
     if args.style:

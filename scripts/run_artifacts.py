@@ -27,6 +27,9 @@ import uuid
 
 MANIFEST_SCHEMA = 1
 
+# 预览有效性印记（#26）：记录「本次预览对哪些输入有效」，供成片阶段决定复用
+PREVIEW_STAMP_SCHEMA = 1
+
 # 占用锁：心跳保活间隔与失效判定阈值（进程死后 ≤ 阈值秒可被接管）
 LOCK_STALE_SECONDS = 60
 LOCK_HEARTBEAT_SECONDS = 5
@@ -66,6 +69,27 @@ def scene_wav(rdir, i, fp):
 
 def manifest_path(rdir):
     return os.path.join(rdir, "manifest.json")
+
+
+def preview_stamp_path(preview_dir):
+    return os.path.join(preview_dir, "stamp.json")
+
+
+def read_preview_stamp(preview_dir):
+    """返回预览印记 dict；缺失或损坏返回 None。"""
+    p = preview_stamp_path(preview_dir)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def write_preview_stamp(preview_dir, stamp):
+    data = json.dumps(stamp, ensure_ascii=False, indent=2).encode("utf-8")
+    atomic_write_bytes(preview_stamp_path(preview_dir), data)
 
 
 def atomic_write_bytes(path, data):

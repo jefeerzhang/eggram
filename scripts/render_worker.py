@@ -22,6 +22,11 @@ style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker �
 显式 output 永远优先。活动运行竞争同一目标时，后启动者在 TTS/MP4 写入前
 被拒（FAIL_AT_PREFLIGHT + 占用诊断）；目标锁 `<output>.lock` 心跳保活，
 成功/失败/崩溃都释放，进程死亡后锁过期可接管，历史成片不删除。
+预览去重（#26）：每次 worker 运行生成唯一 token，Step 2 预览连同输入指纹
+（分镜/style/layout 字节 + motion 开关）写入 run 目录 stamp.json，Step 3 在
+「同 token + 同指纹」时复用该预览（steps 行记 PREVIEW_REUSED）——整个 worker
+只截一次图；分镜/style/layout 任一变化指纹即变、重新预验，绝不以旧成功结果
+渲染新输入；直接渲染不传 token，总是自行预览。
 """
 
 import argparse
@@ -29,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -156,6 +162,9 @@ def _cache_facts(sb, style_name, no_motion):
 
 
 def _pipeline(args, sb, out, style_name):
+    # #26：本次 worker 运行唯一 token——Step 2 的预览结果只供同 token 的 Step 3
+    # 复用，历史成功结果与另一 run 的预览一律不沿用；直接渲染无 token，总自行预览
+    token = uuid.uuid4().hex[:12]
     # Step 1 preflight（含浏览器时点检查；exit 3 语义已在其中处理）
     rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
@@ -167,8 +176,9 @@ def _pipeline(args, sb, out, style_name):
 
     # Step 2 preview：独立跑只为错误分类（全渲内部本有预览闸门）。
     # 预览/音轨目录由 run_key 决定（#22）：分镜字节+style+motion 开关不同即隔离，
-    # 无需 worker 再自算 --preview-dir；raw 旁白缓存与 style 无关，共享安全（#18）
-    render_options = []
+    # 无需 worker 再自算 --preview-dir；raw 旁白缓存与 style 无关，共享安全（#18）。
+    # Step 3 以同 token 复用本次预览（#26）：整个 worker 只截一次图
+    render_options = ["--preview-token", token]
     if args.style:
         render_options += ["--style", args.style]
     if args.no_motion:
@@ -225,14 +235,15 @@ def _pipeline(args, sb, out, style_name):
         sys.exit(wr.STAGE_EXITS["VERIFY"])
 
     # Step 5 回传（steps 行给出各步执行痕迹，防"OK 但没真跑"质疑）
-    steps = " | ".join(
-        [
-            pick(log1, "PREFLIGHT_OK"),
-            pick(log2, "PREVIEW_OK"),
-            pick(log3, "DONE"),
-            pick(log4, "VERIFY_OK"),
-        ]
-    )
+    parts = [
+        pick(log1, "PREFLIGHT_OK"),
+        pick(log2, "PREVIEW_OK"),
+        pick(log3, "DONE"),
+        pick(log4, "VERIFY_OK"),
+    ]
+    if "PREVIEW REUSED" in log3:  # #26：Step 3 复用 Step 2 预览的执行痕迹
+        parts.insert(2, "PREVIEW_REUSED")
+    steps = " | ".join(parts)
     emit("OK", artifact=out, verify=f"[{marks}]", steps=steps, cache=cache)
 
 

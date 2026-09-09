@@ -101,7 +101,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 ## 阶段 2 — 渲视频
 
-> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先；同一目标的活动运行会在配音前被拒（FAIL_AT_PREFLIGHT + 占用诊断），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
+> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 的预览带输入指纹（分镜/style/layout 字节 + motion 开关）印记，Step 3 成片同 run 复用（steps 行记 `PREVIEW_REUSED`）；分镜/style/layout 任一变化即重新预验，直接渲染不参与去重、总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先；同一目标的活动运行会在配音前被拒（FAIL_AT_PREFLIGHT + 占用诊断），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
 
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
