@@ -758,6 +758,35 @@ def test_chart_color_accepts_literal_hex():
         colors,
     )
     assert _curve_stroke(svg) == "#abc123"
+
+
+# ---- 10b 图解标签不裁切 ----
+
+
+def test_chart_highlight_labels_stay_inside_viewbox():
+    """贴边点的标签会外推出画布被裁掉（实测 "MU→0 饱和" 右缘 532 > 500）。
+    断言用产物自身的 rect x/width，不重述实现里的夹取公式。"""
+    chart = {
+        "preset": "curve",
+        "range": {"xmin": 0, "xmax": 5, "ymin": 0, "ymax": 100},
+        "curve": {"points": [{"x": 0, "y": 100}, {"x": 5, "y": 0}]},
+        "highlights": [
+            {"x": 5, "y": 0, "label": "MU→0 饱和见底"},
+            {"x": 0, "y": 100, "label": "起点"},
+            {"x": 2.5, "y": 50, "label": "中点"},
+        ],
+    }
+    svg = sg.resolve_chart(chart, sg.style_token_map(mv.load_style("teaching")))
+    boxes = [
+        (float(m.group(1)), float(m.group(2)))
+        for m in re.finditer(r"<rect x='([-\d.]+)' y='[-\d.]+' width='([-\d.]+)'", svg)
+    ]
+    assert len(boxes) == 3, boxes
+    for x, w in boxes:
+        assert x >= 0, f"标签左缘 {x} 越出 viewBox"
+        assert x + w <= 500, f"标签右缘 {x + w:.1f} 越出 viewBox 500"
+
+
 # ---- 11 公式页分步动效时间线 ----
 
 
