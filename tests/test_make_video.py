@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -697,6 +698,66 @@ def test_load_env_explicit_env_wins_over_dotenv(monkeypatch):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         os.environ.pop("MV_GATE_TEST_VAR", None)
+
+
+# ---- 10 图解取色随皮肤 ----
+
+
+_CHART_FIXTURE = {
+    "preset": "curve",
+    "range": {"xmin": 0, "xmax": 5, "ymin": 0, "ymax": 100},
+    "curve": {
+        "color": "__ACCENT__",
+        "points": [{"x": 0, "y": 0}, {"x": 5, "y": 100}],
+    },
+    "highlights": [{"x": 2, "y": 40, "label": "H", "color": "__WRONG__"}],
+}
+
+
+def _rendered_chart_svg(style_name):
+    sc = {"kind": "diagram", "header": "H", "body": "B", "chart": _CHART_FIXTURE}
+    html = mv.render_html(sc, 1280, 720, mv.load_style(style_name))
+    # 只取图解 SVG 本体：layout CSS 里也注入了同一个 accent，整页断言会假通过
+    return html[html.index("<svg") : html.index("</svg>")]
+
+
+def _curve_stroke(svg):
+    return re.search(r"<path d='[^']*' fill='none' stroke='([^']+)'", svg).group(1)
+
+
+def _point_fill(svg):
+    return re.search(r"<circle [^>]*fill='([^']+)'[^>]*class='glow-point'", svg).group(1)
+
+
+def test_chart_colors_follow_active_skin():
+    """图解取色必须走当前皮肤 palette。旧实现按扁平 key 读 style，
+    而色值嵌在 palette 下，于是恒落函数里写死的默认色。"""
+    light = sg.style_token_map(mv.load_style("classroom"))
+    dark = sg.style_token_map(mv.load_style("teaching"))
+    assert light["__ACCENT__"] != dark["__ACCENT__"]  # 前提：两皮确实不同色
+
+    svg_light = _rendered_chart_svg("classroom")
+    assert _curve_stroke(svg_light) == light["__ACCENT__"]
+    assert _point_fill(svg_light) == light["__WRONG__"]
+
+    svg_dark = _rendered_chart_svg("teaching")
+    assert _curve_stroke(svg_dark) == dark["__ACCENT__"]
+    assert _point_fill(svg_dark) == dark["__WRONG__"]
+
+
+def test_chart_color_accepts_literal_hex():
+    colors = sg.style_token_map(mv.load_style("teaching"))
+    svg = sg.resolve_chart(
+        {
+            "preset": "curve",
+            "curve": {
+                "color": "#abc123",
+                "points": [{"x": 0, "y": 0}, {"x": 1, "y": 1}],
+            },
+        },
+        colors,
+    )
+    assert _curve_stroke(svg) == "#abc123"
 
 
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
