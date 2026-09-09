@@ -182,21 +182,50 @@ def test_prepare_scene_audio_keeps_silence():
 # ---- 03 预览溢出（浏览器探针）----
 
 
-def test_motion_probe_ts_none_is_static():
-    assert mv._motion_probe_ts("none") == [0.0]
-    assert len(mv._motion_probe_ts("pulse")) == 21
+def test_motion_probe_states_static_and_delayed_coverage():
+    assert mv._motion_probe_states("none") == [(0.0, 1.0)]
+    assert mv._motion_probe_states([{"type": "none", "delay": 0}]) == [(0.0, 1.0)]
+    effects = [{"type": "zoom_in", "delay": 2}]
+    states = mv._motion_probe_states(effects)
+    # 不依赖真实旁白时长：延迟动效的初态与放大末态都必须落在采样状态内
+    scales = [mv.motion_vars(effects, e, d)[0] for e, d in states]
+    assert min(scales) == 1.0
+    assert max(scales) == pytest.approx(1.055)
 
 
 # ---- 04 hold 冻结 ----
 
 
-def test_frame_progress_freezes_after_narration():
-    assert mv._frame_progress(0, 30) == 0.0
-    assert mv._frame_progress(29, 30) == 1.0
-    assert mv._frame_progress(30, 30) == 1.0  # hold
-    assert mv._frame_progress(50, 30) == 1.0
-    assert mv._frame_progress(0, 1) == 0.0  # 零旁白不除零
-    assert mv._frame_progress(1, 1) == 1.0
+def test_frame_motion_state_matches_seconds_across_fps():
+    effects = [{"type": "zoom_in", "delay": 2}]
+    # 6 秒旁白：fps=2 → 12 帧，fps=30 → 180 帧；同一秒数状态一致（允许一帧量化）
+    for fps, narr in ((2, 12), (30, 180)):
+        assert mv.frame_motion_state(effects, 0, fps, narr) == (1.0, 1.0, 0.0)
+        at_4s = mv.frame_motion_state(effects, int(4 * fps), fps, narr)
+        assert at_4s[0] == pytest.approx(1.048125)
+        # hold/尾垫帧（k ≥ narr_frames）冻结在末态
+        held = mv.frame_motion_state(effects, narr + fps, fps, narr)
+        assert held[0] == pytest.approx(1.055)
+
+
+def test_frame_motion_state_delay_at_or_after_narration_never_starts():
+    # 6 秒旁白、delay 7 秒：全程保持初态
+    effects = [{"type": "zoom_in", "delay": 7}]
+    for k in range(14):  # 12 帧旁白 + 2 帧 hold
+        assert mv.frame_motion_state(effects, k, 2, 12) == (1.0, 1.0, 0.0)
+    # delay 恰等于旁白终点：同样不启动
+    for k in range(14):
+        assert mv.frame_motion_state([{"type": "pulse", "delay": 6}], k, 2, 12) == (
+            1.0,
+            1.0,
+            0.0,
+        )
+
+
+def test_frame_motion_state_single_frame_narration():
+    # 零旁白除零保护：narr_frames=1 时不抛错
+    state = mv.frame_motion_state([{"type": "zoom_in", "delay": 0}], 0, 30, 1)
+    assert state[0] == 1.0
 
 
 def test_delayed_zoom_starts_after_two_seconds_and_finishes_with_narration():
@@ -471,6 +500,46 @@ def test_browser_overflow_detects_hl_scale(browser):
     assert ".hl" in sels
     assert ".body" not in sels  # 容器未溢出，只有被放大的高亮词被报告
     page.close()
+
+
+def test_browser_overflow_detects_delayed_zoom_end_state(browser):
+    # 延迟动效（delay=2）没有真实旁白时长：预览探测的可达状态里必须含放大末态，
+    # 且末态的溢出能被探测（初态同内容不溢出）——不依赖旁白秒数。
+    sc = {
+        "kind": "rule",
+        "header": "h",
+        "sub": "s",
+        "body": "**B**",
+        "narrate": "n",
+        "motion": [{"type": "zoom_in", "delay": 2}],
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+        motion = mv.resolve_motion(sc, True)
+        end_state = max(
+            mv._motion_probe_states(motion),
+            key=lambda s: mv.motion_vars(motion, *s)[0],
+        )
+        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, 0.0, 1.0))
+        right_initial = page.evaluate(
+            "document.querySelector('.body').getBoundingClientRect().right"
+        )
+        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, *end_state))
+        right_end = page.evaluate(
+            "document.querySelector('.body').getBoundingClientRect().right"
+        )
+        assert right_end > right_initial
+        width = (right_initial + right_end) / 2  # 初态不越界、末态越界的探测宽度
+
+        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, 0.0, 1.0))
+        sels_initial = [sel for sel, _ in mv.preview_overflow(page, width, 720, kind="rule")]
+        assert ".body" not in sels_initial
+        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, *end_state))
+        sels_end = [sel for sel, _ in mv.preview_overflow(page, width, 720, kind="rule")]
+        assert ".body" in sels_end
+    finally:
+        page.close()
 
 
 def test_browser_overflow_reports_top_bound(browser):

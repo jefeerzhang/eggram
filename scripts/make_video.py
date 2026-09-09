@@ -197,7 +197,10 @@ def _palette_hex(palette, key, default=""):
 
 def style_token_map(style):
     p, t, e = style["palette"], style["typography"], style.get("exercise", {})
-    h = lambda k, d="": _palette_hex(p, k, d)
+
+    def h(k, d=""):
+        return _palette_hex(p, k, d)
+
     return {
         "__BG__": h("bg"),
         "__BG2__": h("bg_grad2"),
@@ -349,10 +352,10 @@ def ease_out_cubic(t):
     return 1.0 - (1.0 - t) ** 3
 
 
-def motion_vars(effects, elapsed_seconds, duration_seconds=1.0):
-    """返回 (--m-scale, --m-hl, --m-glow)，时间和 delay 均以秒计。
-    延迟后在剩余旁白时间内完成动效，旁白结束后冻结；默认段长 1 秒。
-    多动效叠加规则：scale 取最大值，hl 取最大值，glow 取最大值。"""
+def motion_vars(effects, elapsed_seconds, duration_seconds):
+    """返回 (--m-scale, --m-hl, --m-glow)。elapsed/duration/delay 均以秒计。
+    延迟后在剩余旁白时间内完成动效，旁白结束后（elapsed≥duration）冻结在末态；
+    delay ≥ duration（延迟不早于旁白结束）不启动。多动效叠加：scale/hl/glow 各取最大值。"""
     duration_seconds = max(0.0, float(duration_seconds))
     elapsed_seconds = max(0.0, min(duration_seconds, float(elapsed_seconds)))
     max_scale, max_hl, max_glow = 1.0, 1.0, 0.0
@@ -391,11 +394,13 @@ def _single_motion_vars(motion, t):
     return 1.0, 1.0, 0.0
 
 
-def _frame_progress(k, narr_frames):
-    """第 k 帧的动效进度：旁白对应帧内按比例推进，之后（hold/尾垫）冻结在末态。"""
-    if k < narr_frames:
-        return k / max(narr_frames - 1, 1)
-    return 1.0
+def frame_motion_state(effects, frame, fps, narr_frames):
+    """第 frame 帧的动效状态（帧→秒的唯一解释入口）：elapsed = frame/fps，
+    旁白终点 = narr_frames/fps；hold/尾垫帧冻结在末态（音画锁）。
+    delay 按秒解释、与 fps 无关：同一秒数在不同 fps 下状态一致（允许一帧量化）。"""
+    duration = narr_frames / float(fps)
+    elapsed = min(frame / float(fps), duration)
+    return motion_vars(effects, elapsed, duration)
 
 
 def apply_motion_css_vars(page, scale, hl, glow):
@@ -736,26 +741,29 @@ def preview_overflow(page, W, H, kind=None):
         return out;
     }"""
     out = []
-    for sel, tag, l, t, r, b, txt in page.evaluate(js, [W, H, selectors]):
+    for sel, tag, left, top, right, bottom, txt in page.evaluate(js, [W, H, selectors]):
         out.append(
             (
                 sel,
-                f"{tag} {sel} 溢出视口 left={l:.0f} top={t:.0f} right={r:.0f} bottom={b:.0f}（viewport {W}x{H}），内容='{txt}'",
+                f"{tag} {sel} 溢出视口 left={left:.0f} top={top:.0f} right={right:.0f} bottom={bottom:.0f}（viewport {W}x{H}），内容='{txt}'",
             )
         )
     return out
 
 
-def _motion_probe_ts(effects):
-    """预览闸门探测的动效进度采样点。none 只测静态；其余按 0..1 网格覆盖峰值。"""
-    # 向后兼容字符串格式
-    if isinstance(effects, str):
-        if effects == "none":
-            return [0.0]
-        return [i / 20.0 for i in range(21)]
-    if all(e["type"] == "none" for e in effects):
-        return [0.0]
-    return [i / 20.0 for i in range(21)]
+def _motion_probe_states(effects):
+    """预览闸门探测的动效可达状态：[(elapsed_seconds, duration_seconds), ...]。
+    none 只测静态；其余动效在其自身可达窗口（delay 后 1 秒内完成）按 0..1 网格采样。
+    不依赖真实旁白时长——TTS 前的预览也能覆盖延迟动效的放大末态。"""
+    if isinstance(effects, str):  # 兼容旧调用
+        effects = [{"type": effects, "delay": 0}]
+    states = [(0.0, 1.0)]
+    for eff in effects:
+        if eff.get("type", "none") == "none":
+            continue
+        delay = max(0.0, float(eff.get("delay", 0)))
+        states.extend((delay + i / 20.0, delay + 1.0) for i in range(21))
+    return states
 
 
 def mi_tts(text, voice):
@@ -1198,7 +1206,7 @@ def main():
             n_frames = frame_counts[i]
             is_static = all(e["type"] == "none" for e in motion) or n_frames == 1
             if is_static:
-                apply_motion_css_vars(page, *motion_vars(motion, 0.0))
+                apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
                 shot = page.screenshot(type="png")
                 for _ in range(n_frames):
                     ff_stdin.write(shot)
@@ -1206,9 +1214,10 @@ def main():
             else:
                 narr_frames = narr_frames_list[i]
                 for k in range(n_frames):
-                    # 旁白对应帧驱动动效进度；hold/尾垫复用末态（音画锁）
-                    t = _frame_progress(k, narr_frames)
-                    apply_motion_css_vars(page, *motion_vars(motion, t))
+                    # 秒语义：elapsed=k/fps，旁白终点=narr_frames/fps；hold/尾垫冻结末态
+                    apply_motion_css_vars(
+                        page, *frame_motion_state(motion, k, FPS, narr_frames)
+                    )
                     ff_stdin.write(page.screenshot(type="png"))
                     gi += 1
         b.close()
@@ -1321,13 +1330,13 @@ def run_preview(
             kind = resolve_kind(sc)
             motion = resolve_motion(sc, motion_enabled)
             # 缩略图取 t=0（起点画面），避免截到中间态
-            apply_motion_css_vars(page, *motion_vars(motion, 0.0))
+            apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
             png = os.path.join(out_dir, f"s{i}.png")
             page.screenshot(path=png, type="png", full_page=False)
-            # 溢出探测覆盖动效实际状态：none 只测静态；其余按网格采样 0..1
+            # 溢出探测覆盖动效可达状态：none 只测静态；其余按各动效自身窗口采样 0..1
             seen, findings = set(), []
-            for t in _motion_probe_ts(motion):
-                apply_motion_css_vars(page, *motion_vars(motion, t))
+            for elapsed, duration in _motion_probe_states(motion):
+                apply_motion_css_vars(page, *motion_vars(motion, elapsed, duration))
                 for sel, msg in preview_overflow(page, W, H, kind=kind):
                     m = re.search(r"内容='(.*)'$", msg)
                     key = (sel, m.group(1) if m else msg)
