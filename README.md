@@ -69,7 +69,7 @@ py scripts/make_video.py examples/now_progressing.json [output/name.mp4] [--styl
 
 | 文档 | 内容 |
 | --- | --- |
-| [SKILL.md](SKILL.md) | Agent 入口，两阶段完整流程 |
+| [SKILL.md](SKILL.md) | Agent 入口，三阶段完整流程 |
 | [docs/teaching-method.md](docs/teaching-method.md) | page-role 教学弧 |
 | [docs/json-schema.md](docs/json-schema.md) | 分镜字段表与 `**` 高亮约定 |
 | [docs/styles.md](docs/styles.md) | 换皮 |
@@ -106,4 +106,4 @@ eggram/
 
 ## 许可证
 
-私人仓库，暂未开源。
+[MIT](LICENSE) © 2026 jefeerzhang
