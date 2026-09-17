@@ -16,6 +16,7 @@ venv/
 
 # local agent/editor state
 .qoder/
+.superpowers/
 
 # local / debug
 .statamcp/
