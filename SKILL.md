@@ -87,7 +87,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 1. 读 [`docs/teaching-method.md`](docs/teaching-method.md)，按 *page-role* 拆弧，写入 `kind`（可同写 `role`）。  
    **Done when：** 含必选弧 `title → rule+ → example+ → practice → answer → summary`；推荐在 `practice` 前有 `mistake`。
 2. 填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。  
-   **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 3.0`；正文是教学内容（色值/字号只在 style）。  
+   **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 5.0`；正文是教学内容（色值/字号只在 style）。  
    **body 换行规则：** 用 `<br>` 表示换行（如 `"body": "第一行<br>第二行"`），**严禁用 `\n`**——`\n` 会被原样显示为文本而非换行。  
    **图解（diagram）规则：** `kind: "diagram"` 页面通过 `chart` 对象声明式调用图表预设（`preset: "curve"`），详见 [`scripts/charts.py`](scripts/charts.py)。  
    **排版变体：** 同一 kind 支持多种排版变体，通过 `layout_variant` 字段选择（如 rule 的 `"side"` 左规则右示例 / `"formula"` 上公式下拆解），详见 [`docs/json-schema.md`](docs/json-schema.md)。  
@@ -117,7 +117,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 
 ### 验收
 
-- *闸门* 绿（含教学弧顺序；`practice.hold >= 3.0`）
+- *闸门* 绿（含教学弧顺序；`practice.hold >= 5.0`）
 - 预览：`_build/preview/<slug>/s*.png` 无文字溢出（worker 换皮批并行时按 style 隔离为 `<slug>__<style>/`，见 #18）
 - 画面：教学内容、整页居中、易错/练习可扫区分
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）

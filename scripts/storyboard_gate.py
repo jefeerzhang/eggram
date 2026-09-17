@@ -865,9 +865,9 @@ def validate_storyboard(tpl):
                     f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
                 )
             hold_v = float(sc.get("hold", 0) or 0)
-            if hold_v < 3.0:
+            if hold_v < 5.0:
                 errors.append(
-                    f"{prefix}: practice hold={hold_v} 须 >= 3.0（docs/teaching-method.md）"
+                    f"{prefix}: practice hold={hold_v} 须 >= 5.0（docs/teaching-method.md）"
                 )
         if kind == "answer":
             if "**" not in sc.get("body", ""):

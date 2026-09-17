@@ -11,7 +11,7 @@
 - **脚本硬阻断**：生成分镜 JSON 前强制输出结构化脚本，抛出选项与用户对齐确认，杜绝盲目生成
 - **分镜驱动**：一页一个动作，`**...**` 标出知识点；字段见 [docs/json-schema.md](docs/json-schema.md)
 - **教学弧（page-role）**：`title → rule+ → example+ → practice → answer → summary` 必选弧；推荐在 `practice` 前加 `mistake`，先讲后练再揭晓
-- **闸门校验**：教学弧顺序 + `practice.hold >= 3.0` 硬门槛，渲染前必过
+- **闸门校验**：教学弧顺序 + `practice.hold >= 5.0` 硬门槛，渲染前必过
 - **换皮**：teaching / classroom / explainer 三套皮肤，只改 style，不动内容与版式
 - **音画锁**：音轨时长与画面帧对齐，hold 段静音；音频按课目录 + 旁白/音色指纹缓存，防串课
 - **克制动效**：focus / pulse / zoom，把眼睛送到高亮与结论

@@ -31,7 +31,7 @@
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
-| hold | practice | ≥3.0（样例 3.0） |
+| hold | practice | ≥5.0（样例 5.0） |
 | zh | | example/mistake 说明（缺省用 sub） |
 | think | | practice 提示语；缺省「先想一想，别急着看答案」；空字符串隐藏提示与间距 |
 
@@ -97,7 +97,7 @@
 
 - *分镜* 字段 = 教学内容；色值/字号 ∈ `style-*.json`
 - layout = 结构槽 `__HEADER__` / `__BODY__` / `__THINK__`（仅 practice） / … + 居中构图
-- *闸门*：`py scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=3.0`；exit 0）
+- *闸门*：`py scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=5.0`；exit 0）
 - 预览：`py scripts/make_video.py <json> --preview`（缩略图 + 溢出）；全量渲染会先跑同一预览，通过后再 TTS
 
 > Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默失败、零输出）；macOS/Linux 用 `python3`。

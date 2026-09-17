@@ -74,7 +74,7 @@ def test_worker_accepts_preview_configuration_overrides(tts_url, override):
                 for kind in ("title", "rule", "example", "practice", "answer", "summary")
             ],
         }
-        tpl["scenes"][3]["hold"] = 3
+        tpl["scenes"][3]["hold"] = 5
         env = dict(os.environ, MIMO_API_KEY="local-test", MIMO_API_URL=tts_url, PYTHONUTF8="1")
         flags = []
         if override == "style":
@@ -127,7 +127,7 @@ def test_rendered_delayed_zoom_uses_video_seconds_and_freezes_during_hold(tts_ur
             ],
         }
         tpl["scenes"][1].update(motion=[{"type": "zoom_in", "delay": 2}], hold=2)
-        tpl["scenes"][3]["hold"] = 3
+        tpl["scenes"][3]["hold"] = 5
         storyboard = project / "lesson.json"
         storyboard.write_text(json.dumps(tpl), encoding="utf-8")
         output = project / "lesson.mp4"
@@ -179,7 +179,7 @@ def _write_source_storyboard(project, sub, narrate, hold=0.0):
         ],
     }
     tpl["scenes"][0]["hold"] = hold
-    tpl["scenes"][3]["hold"] = 3.0  # practice 闸门要求 hold >= 3.0
+    tpl["scenes"][3]["hold"] = 5.0  # practice 闸门要求 hold >= 5.0
     (d / "lesson.json").write_text(json.dumps(tpl), encoding="utf-8")
 
 

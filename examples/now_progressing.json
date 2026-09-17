@@ -70,7 +70,7 @@
       "sub": "再判断一句，对吗？",
       "body": "She is **play** piano. ?",
       "narrate": "再来一句：She is play piano. 这句话对还是不对？想一下。",
-      "hold": 3.0
+      "hold": 5.0
     },
     {
       "kind": "answer",

@@ -15,7 +15,7 @@
 | `concept_anchor` | `rule` | body 用 `**` 标结构/变形；单概念 |
 | `worked_demo` | `example` | 英文句 + `**`；sub/zh=中文义 |
 | `common_mistake` | `mistake` | 错误写法 + `**` 错点；sub/zh=诱因 |
-| `understanding_check` | `practice` | 应用判断句 + `**`；`hold>=3.0`；think=练习提示语，空串隐藏 |
+| `understanding_check` | `practice` | 应用判断句 + `**`；`hold>=5.0`；think=练习提示语，空串隐藏 |
 | `check_reveal` | `answer` | 正确句 + `**`；sub=一句原因 |
 | `recap` | `summary` | body=公式；sub=下一动作/再见 |
 
@@ -36,7 +36,7 @@
   "voices": {"narrator": "苏打", "student": "冰糖"},
   "scenes": [
     {"kind": "rule", "narrate": "边际效用就是...", "voice": "narrator"},
-    {"kind": "practice", "narrate": "老师，为什么第二杯半价呢？", "voice": "student", "hold": 3.0},
+    {"kind": "practice", "narrate": "老师，为什么第二杯半价呢？", "voice": "student", "hold": 5.0},
     {"kind": "answer", "narrate": "好问题！正因为边际效用递减...", "voice": "narrator"}
   ]
 }
