@@ -302,6 +302,53 @@ def test_validate_storyboard_accepts_default_and_valid_fps():
     assert not any("fps" in e for e in errors)
 
 
+def test_validate_storyboard_rejects_non_numeric_hold():
+    tpl = load_sample()
+    for sc in tpl["scenes"]:
+        if sc.get("kind") == "practice":
+            sc["hold"] = "五秒"
+    errors, _ = mv.validate_storyboard(tpl)
+    assert any("有限数字" in e for e in errors)
+
+
+def test_prepare_storyboard_rejects_non_integer_size():
+    tpl = load_sample()
+    tpl["width"] = "1280px"
+    tpl["height"] = 720.5
+    prep = mv.prepare_storyboard(tpl)
+    assert any("width" in e for e in prep["errors"])
+    assert any("height" in e for e in prep["errors"])
+    assert prep["W"] == 1280 and prep["H"] == 720
+
+
+def test_unverified_preview_requires_clean_report():
+    tpl = load_sample()
+    scenes = tpl["scenes"]
+    with tempfile.TemporaryDirectory(prefix="pv_") as tmp:
+        missing = mv.unverified_preview(tmp, scenes)
+        assert missing and "未找到" in missing[0]
+
+        report = [
+            {
+                "i": i,
+                "kind": mv.resolve_kind(sc),
+                "findings": [],
+                "placeholder_errs": [],
+            }
+            for i, sc in enumerate(scenes)
+        ]
+        path = os.path.join(tmp, "overflow.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f)
+        assert mv.unverified_preview(tmp, scenes) == []
+
+        report[0]["findings"] = [{"sel": ".body", "msg": "溢出"}]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f)
+        bad = mv.unverified_preview(tmp, scenes)
+        assert any("溢出" in e for e in bad)
+
+
 def test_make_video_invalid_fps_does_not_call_tts(monkeypatch):
     tpl = load_sample()
     tpl["fps"] = 0
@@ -1112,6 +1159,26 @@ def test_browser_overflow_detects_delayed_zoom_end_state(browser):
         assert ".body" in sels_end
     finally:
         page.close()
+
+
+def test_browser_overflow_reports_clipped_text(browser):
+    # 盒子仍在视口内，但槽自身 overflow:hidden 把字裁掉，也要报
+    sc = {"kind": "rule", "header": "h", "sub": "s", "body": "完整的一句话", "narrate": "n"}
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.evaluate(
+        """() => {
+          const b = document.querySelector('.body');
+          b.style.display = 'block';
+          b.style.overflow = 'hidden';
+          b.style.height = '20px';
+          b.style.width = '80px';
+          b.textContent = '这是一段明显超出卡片高度和宽度的说明文字';
+        }"""
+    )
+    findings = mv.preview_overflow(page, 1280, 720, kind="rule")
+    assert any(sel == ".body" and "裁切" in msg for sel, msg in findings)
+    page.close()
 
 
 def test_browser_overflow_reports_top_bound(browser):

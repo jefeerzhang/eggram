@@ -9,8 +9,9 @@ make_video.py — 教学微课渲染器（Skill 阶段 2）
 闸门规则、布局选择与页面准备集中在 storyboard_gate.py（唯一规则源）；
 本模块持有运行环境与媒体管线：浏览器发现、TTS、音频加工、编码、预览探测执行。
 预览去重：worker 先用 --preview 单独预验，再以 --skip-preview 渲成片，一次运行
-只截一次图。预览目录由 run_key（分镜字节 + style + motion 开关）决定，两次调用
-指向同一目录，因此跳过预览即复用刚验过的产物；输入一变 run_key 即变。
+只截一次图。跳过前必须读到同一目录里通过的 overflow.json（页数一致、无溢出、
+无占位符错误）；缺失或未通过则停，不配音。预览目录由 run_key（分镜字节 +
+style + motion 开关）决定。
 """
 
 import argparse
@@ -41,6 +42,7 @@ from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker
     motion_vars,
     prepare_storyboard,
     preview_overflow,
+    parse_seconds,
     render_html,
     resolve_kind,
     resolve_motion,
@@ -281,7 +283,7 @@ def build_parser():
     pv.add_argument(
         "--skip-preview",
         action="store_true",
-        help="跳过预览直接成片：复用本 run 目录（同 run_key）里已验过的预览产物",
+        help="跳过重新截图：仅当本目录 overflow.json 已通过（页数一致且无溢出）",
     )
     p.add_argument(
         "--browser",
@@ -350,8 +352,15 @@ def main():
 
     # 预览闸门：缩略图 + 溢出；--preview 到此结束。
     # 去重：完整 worker 的 Step 2 已用 --preview 验过同 run_key 的产物，
-    # 成片阶段传 --skip-preview 复用，不再重复截图。直接渲染默认自行预览。
+    # 成片阶段传 --skip-preview 复用。缺报告、页数不符或仍有溢出则停，不配音。
     if args.skip_preview:
+        preview_errs = unverified_preview(preview_out, scenes)
+        if preview_errs:
+            print("PREVIEW FAILED:")
+            for e in preview_errs:
+                print(" -", e)
+            print("预览未通过，已跳过配音/成片。先跑 --preview，或去掉 --skip-preview。")
+            sys.exit(1)
         print(f"1/4 预览截图与溢出... 跳过（复用已有预览）→ {preview_out}")
     else:
         print("1/4 预览截图与溢出...")
@@ -376,7 +385,9 @@ def main():
         raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
         fp = _audio_fingerprint(sc["narrate"], sc_voice)
         wav_path = ra.scene_wav(rdir, i, fp)
-        hold = float(sc.get("hold", 0.0))
+        hold = parse_seconds(sc.get("hold", 0.0))
+        if hold is None:
+            raise RuntimeError(f"scene {i} hold 不是有限数字（闸门应已拒绝）")
         if args.reuse_audio and _cache_hit(raw_path, sc_voice, sc["narrate"]):
             raw_pcm, rate = read_wav_pcm(raw_path)
             if rate != SAMPLE_RATE:
@@ -606,8 +617,10 @@ def _write_cache_meta(raw_path, voice, narrate, rate):
         "rate": rate,
         "fp": _audio_fingerprint(narrate, voice),
     }
-    with open(raw_path + ".meta.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    ra.atomic_write_bytes(
+        raw_path + ".meta.json",
+        json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"),
+    )
 
 
 def _cache_hit(raw_path, voice, narrate):
@@ -641,6 +654,40 @@ def _ffprobe_duration(path):
     except Exception:
         pass
     return None
+
+
+def unverified_preview(preview_dir, scenes):
+    """--skip-preview 的准入检查。返回错误列表；空列表表示可以复用、不必重截。
+
+    报告须存在、可解析、页数与分镜一致，且每页无溢出、无占位符错误、kind 相符。
+    """
+    path = os.path.join(preview_dir, "overflow.json")
+    if not os.path.isfile(path):
+        return [f"未找到已通过的预览报告: {path}"]
+    try:
+        with open(path, encoding="utf-8") as f:
+            report = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return [f"预览报告无法读取: {path} ({e})"]
+    if not isinstance(report, list) or len(report) != len(scenes):
+        n = len(report) if isinstance(report, list) else "非列表"
+        return [f"预览报告页数 {n} 与分镜 {len(scenes)} 不符: {path}"]
+    errs = []
+    for i, sc in enumerate(scenes):
+        item = report[i]
+        if not isinstance(item, dict):
+            errs.append(f"scene {i} 预览记录不是对象")
+            continue
+        kind = resolve_kind(sc)
+        if item.get("kind") != kind:
+            errs.append(
+                f"scene {i} 预览 kind={item.get('kind')!r} 与分镜 {kind} 不符"
+            )
+        if item.get("findings"):
+            errs.append(f"scene {i} 预览仍有溢出")
+        if item.get("placeholder_errs"):
+            errs.append(f"scene {i} 预览仍有占位符错误")
+    return errs
 
 
 def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir):

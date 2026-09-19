@@ -859,15 +859,18 @@ def validate_storyboard(tpl):
                 )
             if not (sc.get("zh") or sc.get("sub")):
                 errors.append(f"{prefix}: mistake 须有 sub/zh 说明「为什么容易错」")
+        if "hold" in sc or kind == "practice":
+            hold_v = parse_seconds(sc.get("hold", 0))
+            if hold_v is None:
+                errors.append(f"{prefix}: hold={sc.get('hold')!r} 须为有限数字")
+            elif kind == "practice" and hold_v < 5.0:
+                errors.append(
+                    f"{prefix}: practice hold={hold_v} 须 >= 5.0（docs/teaching-method.md）"
+                )
         if kind == "practice":
             if "**" not in sc.get("body", ""):
                 errors.append(
                     f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
-                )
-            hold_v = float(sc.get("hold", 0) or 0)
-            if hold_v < 5.0:
-                errors.append(
-                    f"{prefix}: practice hold={hold_v} 须 >= 5.0（docs/teaching-method.md）"
                 )
         if kind == "answer":
             if "**" not in sc.get("body", ""):
@@ -970,34 +973,77 @@ _OVERFLOW_SELECTORS_BY_KIND = {
 }
 
 
-def preview_overflow(page, W, H, kind):
-    """在已 set_content 的 page 上测关键槽是否溢出视口。返回 list[(selector, msg)]。
+def parse_seconds(value):
+    """把 hold 收成有限秒数。空值当 0；bool / 非数字返回 None（闸门报错，不抛异常）。"""
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
 
-    按 kind 取 _OVERFLOW_SELECTORS_BY_KIND，精确匹配该 layout 的实际类名。
+
+def parse_positive_px(value, default, name):
+    """宽高须为正整数。缺省用 default；非法时返回 (default, 错误文案)。"""
+    if value is None:
+        return default, None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return default, f"{name} 须为正整数（当前 {value!r}）；缺省 {default}"
+    return value, None
+
+
+def preview_overflow(page, W, H, kind):
+    """在已 set_content 的 page 上测关键槽是否溢出视口，或被自身 overflow 裁切。
+
+    返回 list[(selector, msg)]。按 kind 取 _OVERFLOW_SELECTORS_BY_KIND。
+    视口越界用盒子坐标；卡片内部裁字只在该槽 overflow 为 hidden/clip/scroll/auto
+    且 scroll 尺寸大于 client 时报告，避免把正常换行当成溢出。
     """
     selectors = _OVERFLOW_SELECTORS_BY_KIND[kind]
     js = """([W, H, sels]) => {
         const out = [];
+        const clips = (el) => {
+            const s = getComputedStyle(el);
+            const bad = (v) => v === 'hidden' || v === 'clip' || v === 'scroll' || v === 'auto';
+            return bad(s.overflowX) || bad(s.overflowY);
+        };
         for (const sel of sels) {
             for (const el of document.querySelectorAll(sel)) {
                 if (!el || !el.textContent || !el.textContent.trim()) continue;
                 const r = el.getBoundingClientRect();
                 if (r.width === 0 || r.height === 0) continue;
+                const txt = (el.textContent || '').slice(0, 40);
                 if (r.right > W + 0.5 || r.bottom > H + 0.5 || r.left < -0.5 || r.top < -0.5) {
-                    out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, (el.textContent || '').slice(0, 40)]);
+                    out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, txt, 'viewport']);
+                }
+                if (clips(el) && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
+                    out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, txt, 'clip']);
                 }
             }
         }
         return out;
     }"""
     out = []
-    for sel, tag, left, top, right, bottom, txt in page.evaluate(js, [W, H, selectors]):
-        out.append(
-            (
-                sel,
-                f"{tag} {sel} 溢出视口 left={left:.0f} top={top:.0f} right={right:.0f} bottom={bottom:.0f}（viewport {W}x{H}），内容='{txt}'",
+    for sel, tag, left, top, right, bottom, txt, how in page.evaluate(
+        js, [W, H, selectors]
+    ):
+        if how == "clip":
+            msg = (
+                f"{tag} {sel} 内容被裁切 scroll 超出 client"
+                f"（viewport {W}x{H}），内容='{txt}'"
             )
-        )
+        else:
+            msg = (
+                f"{tag} {sel} 溢出视口 left={left:.0f} top={top:.0f} "
+                f"right={right:.0f} bottom={bottom:.0f}（viewport {W}x{H}），内容='{txt}'"
+            )
+        out.append((sel, msg))
     return out
 
 
@@ -1044,14 +1090,18 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
     """
     style_name = style_name or tpl.get("style", "teaching")
     style = load_style(style_name)
-    W = int(tpl.get("width", 1280))
-    H = int(tpl.get("height", 720))
+    errors, warnings = [], []
+    W, werr = parse_positive_px(tpl.get("width", 1280), 1280, "width")
+    H, herr = parse_positive_px(tpl.get("height", 720), 720, "height")
+    if werr:
+        errors.append(werr)
+    if herr:
+        errors.append(herr)
     fps_raw = tpl.get("fps", 30)
     if motion_enabled is None:
         motion_enabled = resolve_motion_enabled(tpl)
     scenes = tpl.get("scenes") or []
 
-    errors, warnings = [], []
     errors.extend(validate_layouts())
     sb_errs, sb_warns = validate_storyboard(tpl)
     errors.extend(sb_errs)
