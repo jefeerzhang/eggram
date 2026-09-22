@@ -311,6 +311,20 @@ def test_validate_storyboard_rejects_non_numeric_hold():
     assert any("有限数字" in e for e in errors)
 
 
+def test_validate_storyboard_rejects_practice_hold_cue_in_narrate():
+    tpl = load_sample()
+    for sc in tpl["scenes"]:
+        if sc.get("kind") == "practice":
+            sc["narrate"] = "这句话对吗？我想五秒。"
+    errors, _ = mv.validate_storyboard(tpl)
+    assert any("禁止报思考时间" in e for e in errors)
+    for sc in tpl["scenes"]:
+        if sc.get("kind") == "practice":
+            sc["narrate"] = "这句话对还是不对？"
+    errors, _ = mv.validate_storyboard(tpl)
+    assert not any("禁止报思考时间" in e for e in errors)
+
+
 def test_prepare_storyboard_rejects_non_integer_size():
     tpl = load_sample()
     tpl["width"] = "1280px"

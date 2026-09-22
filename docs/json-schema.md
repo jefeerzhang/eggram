@@ -31,9 +31,9 @@
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
-| hold | practice | ≥5.0（样例 5.0） |
+| hold | practice | ≥5.0（样例 5.0）；提供思考静音，**旁白不要口播「想几秒」** |
 | zh | | example/mistake 说明（缺省用 sub） |
-| think | | practice 提示语；缺省「先想一想，别急着看答案」；空字符串隐藏提示与间距 |
+| think | | practice 提示语；缺省「先想一想，别急着看答案」（仅画面，不进 TTS）；空字符串隐藏提示与间距 |
 
 \* 可只写 `role`。
 

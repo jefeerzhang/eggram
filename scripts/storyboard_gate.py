@@ -150,6 +150,14 @@ ICONS = {
 _ICON_TOKEN_RE = re.compile(r"\[(\w+)\]")
 
 PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
+# practice 旁白禁止口播「思考计时」：停顿只靠 hold，提示只写 think（画面）
+_PRACTICE_HOLD_CUE_RE = re.compile(
+    r"我想\s*[一二三四五六七八九十两\d]*\s*秒"
+    r"|想\s*[一二三四五六七八九十两\d]+\s*秒钟?"
+    r"|想三秒钟|想五秒钟"
+    r"|想一下"
+    r"|想一想[。！？]?$"
+)
 # 仅拦样式 hex token；不拦纯数字——教学文本里「100 米」「5 个动作」常见，误伤面太大。
 LEAK_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 # 禁止 layout 在 HTML 节点属性里烘焙视觉样式（font-size/color/background/border）。
@@ -871,6 +879,13 @@ def validate_storyboard(tpl):
             if "**" not in sc.get("body", ""):
                 errors.append(
                     f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
+                )
+            narr = sc.get("narrate") or ""
+            if _PRACTICE_HOLD_CUE_RE.search(narr):
+                errors.append(
+                    f"{prefix}: practice 旁白禁止报思考时间"
+                    f"（如「想一下」「我想五秒」「想三秒钟」）；"
+                    f"停顿只靠 hold，提示只写 think 字段"
                 )
         if kind == "answer":
             if "**" not in sc.get("body", ""):

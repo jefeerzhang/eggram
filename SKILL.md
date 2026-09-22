@@ -39,7 +39,7 @@ description: >
      | 2 | rule | 核心定义/结构式 | 拆解规则 | - |
      | 3 | example | 典型示范 + 译文 | 示范应用 | - |
      | 4 | mistake | 典型易错点 | 敲黑板，分析诱因 | - |
-     | 5 | practice | 互动自测题 | 抛出问题，引导思考 | 停顿思考（默认 ≥3s） |
+     | 5 | practice | 互动自测题 | 只抛问题/选项，**不说**「想几秒」 | 停顿靠 hold≥5s；提示写 think |
      | 6 | answer | 答案揭晓 + 简短原因 | 正向反馈，解释原因 | - |
      | 7 | summary | 可带走口诀/终极公式 | 总结要点，鼓励结尾 | - |
 
@@ -88,6 +88,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
    **Done when：** 含必选弧 `title → rule+ → example+ → practice → answer → summary`；推荐在 `practice` 前有 `mistake`。
 2. 填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。  
    **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 5.0`；正文是教学内容（色值/字号只在 style）。  
+   **practice 旁白禁令：** 禁止口播思考计时（「想一下」「我想五秒」「想三秒钟」等）。停顿只靠 `hold` 静音；屏幕提示只写 `think` 字段。  
    **body 换行规则：** 用 `<br>` 表示换行（如 `"body": "第一行<br>第二行"`），**严禁用 `\n`**——`\n` 会被原样显示为文本而非换行。  
    **图解（diagram）规则：** `kind: "diagram"` 页面通过 `chart` 对象声明式调用图表预设（`preset: "curve"`），详见 [`scripts/charts.py`](scripts/charts.py)。  
    **排版变体：** 同一 kind 支持多种排版变体，通过 `layout_variant` 字段选择（如 rule 的 `"side"` 左规则右示例 / `"formula"` 上公式下拆解），详见 [`docs/json-schema.md`](docs/json-schema.md)。  
