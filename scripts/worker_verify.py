@@ -11,10 +11,11 @@
 每项终态输出协议行 `CHECK <n> PASS|FAIL|SKIP|NOTRUN`（空白分词，#25）；
 全过 → stdout `VERIFY_OK [<六格>]`、exit 0；任一失败 → exit 4 + FAIL_AT_VERIFY 文案。
 
-音轨定位（#22）：按 (分镜文件字节, style, motion 开关) 重算 run_key 精确定位
-本次运行的 manifest，用 manifest 列出的「本次实际音轨集合」独立测量。manifest
-不存在 → 检查 4 直接失败（视为未渲染/未完成），不回退到共享 raw 目录猜文件名：
-那会量到上一版或别的皮肤的音轨，比报错更糟。也不猜最近目录、不扫同名残留文件。
+音轨定位（#22）：按 (分镜文件字节, style, motion 开关, templates/ 内容) 重算
+run_key 精确定位本次运行的 manifest，用 manifest 列出的「本次实际音轨集合」独立
+测量。manifest 不存在 → 检查 4 直接失败（视为未渲染/未完成），不回退到共享 raw
+目录猜文件名：那会量到上一版或别的皮肤的音轨，比报错更糟。也不猜最近目录、不扫
+同名残留文件。模板在预览后被动过时 key 会变，定位失败即如实报错而不是量错产物。
 """
 
 import argparse
@@ -26,13 +27,13 @@ import wave
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
+import audio_cache as ac  # noqa: E402  缓存契约（纯 stdlib，与渲染器同一条判据）
 import run_artifacts as ra  # noqa: E402
+import toolchain as tc  # noqa: E402  时长测量（惰性解析 ffmpeg）
 import worker_result as wr  # noqa: E402
-from storyboard_gate import resolve_motion_enabled  # noqa: E402
-from make_video import (  # noqa: E402
-    _audio_paths,
-    _cache_hit,
-    _ffprobe_duration,
+from storyboard_gate import (  # noqa: E402
+    resolve_motion_enabled,
+    resolve_style_name,
     resolve_voice,
 )
 
@@ -65,23 +66,18 @@ def resolve_audio_sources(storyboard, style_name, motion_enabled):
     """
     rdir = ra.locate_run(ROOT, storyboard, style_name, motion_enabled)
     manifest = ra.read_manifest(rdir)
-    if not manifest or manifest.get("schema") != ra.MANIFEST_SCHEMA:
+    if not ra.is_current_manifest(manifest):
         return [], f"no-manifest:{rdir}", None
-    return (
-        [sc["wav"] for sc in manifest.get("scenes", [])],
-        f"run:{rdir}",
-        manifest,
-    )
+    return ra.scene_wavs(manifest), f"run:{rdir}", manifest
 
 
 def _cache_facts(manifest):
     """本次生成/复用事实（make_video 执行时记录进 manifest）；旧产物无此字段。"""
-    if not manifest or "tts_generated" not in manifest:
+    facts = ra.tts_facts(manifest)
+    if facts is None:
         return ""
-    return (
-        f"(本次生成 {manifest.get('tts_generated', '?')} / "
-        f"复用 {manifest.get('tts_reused', '?')}, mode={manifest.get('reuse_mode', '?')})"
-    )
+    generated, reused, mode = facts
+    return f"(本次生成 {generated} / 复用 {reused}, mode={mode})"
 
 
 def main():
@@ -101,10 +97,10 @@ def main():
     )
     args = ap.parse_args()
 
-    # 检查 3：mp4 存在且时长 > 0（_ffprobe_duration 走 imageio_ffmpeg，不依赖 ffprobe）
+    # 检查 3：mp4 存在且时长 > 0（tc.media_duration 走 imageio_ffmpeg，不依赖 ffprobe）
     if not os.path.isfile(args.mp4):
         fail(3, f"mp4 不存在: {args.mp4}")
-    got = _ffprobe_duration(args.mp4) or 0.0
+    got = tc.media_duration(args.mp4) or 0.0
     if got <= 0:
         fail(3, f"mp4 时长无法解析或为 0: {args.mp4}")
     _record(3, wr.PASS, f"{os.path.getsize(args.mp4)}B {got:.2f}s")
@@ -114,7 +110,7 @@ def main():
     with open(args.storyboard, encoding="utf-8") as f:
         tpl = json.load(f)
     motion_enabled = resolve_motion_enabled(tpl, args.no_motion)
-    style_name = args.style or tpl.get("style", "teaching")
+    style_name = resolve_style_name(tpl, args.style)
     wavs, src, manifest = resolve_audio_sources(
         args.storyboard, style_name, motion_enabled
     )
@@ -153,8 +149,8 @@ def main():
         cache_dir = os.path.join(ROOT, "_build", slug)
         for i, sc in enumerate(tpl["scenes"]):
             sc_voice = resolve_voice(sc, tpl)
-            raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
-            if not _cache_hit(raw_path, sc_voice, sc["narrate"]):
+            raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice)
+            if not ac.is_hit(raw_path, sc_voice, sc["narrate"]):
                 fail(5, f"cache miss scene {i}: {raw_path}（旁白/音色与缓存不符）")
         _record(5, wr.PASS, ("reuse-confirmed " + _cache_facts(manifest)).rstrip())
     else:

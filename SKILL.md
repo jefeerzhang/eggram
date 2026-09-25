@@ -88,7 +88,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
    **Done when：** 含必选弧 `title → rule+ → example+ → practice → answer → summary`；推荐在 `practice` 前有 `mistake`。
 2. 填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。  
    **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 5.0`；正文是教学内容（色值/字号只在 style）。  
-   **practice 旁白禁令：** 禁止口播思考计时（「想一下」「我想五秒」「想三秒钟」等）。停顿只靠 `hold` 静音；屏幕提示只写 `think` 字段。  
+   **practice 旁白禁令：** 禁止口播任何思考计时（「想一下」「我想五秒」「接下来三秒」「给你三秒钟」等）。停顿只靠 `hold` 静音；屏幕提示只写 `think` 字段。  
    **body 换行规则：** 用 `<br>` 表示换行（如 `"body": "第一行<br>第二行"`），**严禁用 `\n`**——`\n` 会被原样显示为文本而非换行。  
    **图解（diagram）规则：** `kind: "diagram"` 页面通过 `chart` 对象声明式调用图表预设（`preset: "curve"`），详见 [`scripts/charts.py`](scripts/charts.py)。  
    **排版变体：** 同一 kind 支持多种排版变体，通过 `layout_variant` 字段选择（如 rule 的 `"side"` 左规则右示例 / `"formula"` 上公式下拆解），详见 [`docs/json-schema.md`](docs/json-schema.md)。  
@@ -102,7 +102,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 ## 阶段 2 — 渲视频
 
-> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 跑 `make_video.py --preview` 截图并验溢出，Step 3 传 `--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关）的产物；直接渲染不传 `--skip-preview`，总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先（指向同一目标的后启动者覆盖先写者），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
+> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 跑 `make_video.py --preview` 截图并验溢出，Step 3 传 `--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关 + `templates/` 内容）的产物——复用前必须读到属本次分镜且已通过的 `overflow.json`（页数/顺序/kind/指纹一致、无溢出、无占位符错误），任一不符即停且不配音（exit 4，worker 归 PREVIEW 阶段失败）；直接渲染不传 `--skip-preview`，总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先（指向同一目标的后启动者覆盖先写者），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
 
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 

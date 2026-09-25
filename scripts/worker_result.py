@@ -3,7 +3,7 @@
 集中六项验收条目、单项状态（通过/失败/显式跳过/因前序失败未执行）与
 阶段→退出码映射；render_worker（父入口）与 worker_verify（验收脚本）共用。
 脚本间协议行 `CHECK <n> <STATE> <detail...>` 按空白分词解析，不依赖字符位置。
-内部模块：仅被 worker 脚本使用，不构成对外公开接口。
+内部模块：被 make_video（子进程退出码契约）与 worker 脚本共用，不构成对外公开接口。
 """
 
 # 六项验收编号：1 闸门绿 · 2 预览无溢出 · 3 mp4存在且时长>0 · 4 音画锁±5%
@@ -18,6 +18,37 @@ MARKS = {PASS: "✓", FAIL: "✗", SKIP: "-", NOTRUN: "·"}
 
 # 阶段 → worker 退出码（0=OK）。
 STAGE_EXITS = {"PREFLIGHT": 1, "PREVIEW": 2, "RENDER": 3, "VERIFY": 4}
+
+# make_video.py 子进程退出码（与上面 worker 自身的 STAGE_EXITS 是两套命名空间）。
+# 1 是通用失败，含义由调用阶段区分：--preview 路径=预览溢出，成片路径=渲染/编码失败。
+# 4 单列而不是并进 1：worker 才能把「预览过期/未通过」归到 PREVIEW 阶段，而不是
+# 报成 RENDER 失败（#26 AC2「失败分类和退出语义正确」）。
+MV_EXIT_FAIL = 1
+MV_EXIT_VALIDATION = 2
+MV_EXIT_BROWSER = 3
+MV_EXIT_PREVIEW_STALE = 4
+
+# 渲染步（Step 3）里 make_video 的退出码 → 本 worker 的阶段归因与诊断前缀。
+# 两套命名空间共用 1–4，这里显式翻译一次；调用方不再逐码 if 比较数字。
+# 只用于渲染步：--preview 步的失败一律归 PREVIEW（那里 rc=1 是预览溢出，与渲染步
+# rc=1 的含义不同），故两处不能共用这张表。
+MV_EXIT_STAGE_ROUTING = {
+    MV_EXIT_FAIL: ("RENDER", "make_video.py exit {rc}"),
+    MV_EXIT_VALIDATION: ("PREFLIGHT", "render 中 make_video exit {rc}（闸门校验失败）"),
+    MV_EXIT_BROWSER: ("PREFLIGHT", "render 中 make_video exit {rc}（浏览器缺失）"),
+    MV_EXIT_PREVIEW_STALE: (
+        "PREVIEW",
+        "make_video exit {rc}：--skip-preview 复用被拒（预览缺失或未通过）",
+    ),
+}
+
+
+def classify_render_exit(rc):
+    """渲染步的 make_video 退出码 → (worker 阶段, 诊断前缀)。
+
+    未列入映射表的非零码按 RENDER 处理（渲染/编码期未预期失败）。
+    """
+    return MV_EXIT_STAGE_ROUTING.get(rc, ("RENDER", "make_video.py exit {rc}"))
 
 
 def check_line(item, state, detail=""):

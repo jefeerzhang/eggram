@@ -29,7 +29,7 @@ def main():
             print(" -", e)
         sys.exit(2)
     print(
-        f"OK {path}  scenes={len(prep['scenes'])}  style={prep['style_name']}"
+        f"OK {path}  scenes={len(prep['scenes'])}  style={prep['cfg'].style_name}"
     )
 
 

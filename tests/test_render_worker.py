@@ -20,7 +20,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from make_video import FFMPEG, find_browser  # noqa: E402
+from toolchain import browser_path, ffmpeg_path  # noqa: E402
 import run_artifacts as ra  # noqa: E402
 
 
@@ -60,7 +60,7 @@ def tts_url(request):
 
 @pytest.mark.parametrize("override", ["style", "no-motion", "browser"])
 def test_worker_accepts_preview_configuration_overrides(tts_url, override):
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_worker_") as tmp:
@@ -142,7 +142,7 @@ def test_rendered_delayed_zoom_uses_video_seconds_and_freezes_during_hold(tts_ur
         # The title lasts 6.5s; inspect rule elapsed times 1s, 4s, 5.5s and hold 7s.
         for second in (7.5, 10.5, 12, 13.5):
             frame = subprocess.run(
-                [FFMPEG, "-loglevel", "error", "-ss", str(second), "-i", str(output),
+                [ffmpeg_path(), "-loglevel", "error", "-ss", str(second), "-i", str(output),
                  "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                 capture_output=True, check=True, timeout=15,
             ).stdout
@@ -193,7 +193,7 @@ def _run_worker(project, env, sb, out, *extra):
 @pytest.mark.parametrize("tts_url", [0.3], indirect=True)
 def test_parallel_same_slug_different_sources_own_their_artifacts(tts_url):
     """不同来源但主名相同的分镜并行：预览与加工音轨互不覆盖（显式 MP4 目标）。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_par_src_") as tmp:
@@ -229,7 +229,7 @@ def test_parallel_same_slug_different_sources_own_their_artifacts(tts_url):
 @pytest.mark.parametrize("tts_url", [0.3], indirect=True)
 def test_parallel_same_narration_different_hold_use_own_processed_audio(tts_url):
     """相同旁白与音色、hold 不同并行：各用各的加工音轨且分别满足音画锁。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_par_hold_") as tmp:
@@ -268,7 +268,7 @@ def test_parallel_same_narration_different_hold_use_own_processed_audio(tts_url)
 @pytest.mark.parametrize("tts_url", [0.3], indirect=True)
 def test_skin_rerender_reuses_raw_not_processed_audio(tts_url):
     """换皮复用 raw（cache 全命中），加工音轨归各自 run、不冒充共享 raw。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_skin_raw_") as tmp:
@@ -386,7 +386,7 @@ def test_preflight_reads_tts_key_from_dotenv():
 
 
 def test_worker_preview_failure_runs_zero_tts_requests():
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_fail_pv_") as tmp:
@@ -407,7 +407,7 @@ def test_worker_preview_failure_runs_zero_tts_requests():
 
 
 def test_worker_tts_failure_reports_render_stage():
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_fail_rd_") as tmp:
@@ -424,7 +424,7 @@ def test_worker_tts_failure_reports_render_stage():
 
 def test_worker_verify_failure_marks_failed_and_unexecuted(tts_url):
     """预览拦不到的分镜级残留（rule 页 wrong_body 不进渲染 HTML）→ 检查 6 红。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_fail_vf_") as tmp:
@@ -445,7 +445,7 @@ def test_worker_verify_failure_marks_failed_and_unexecuted(tts_url):
 
 @pytest.mark.parametrize("tts_url", [0.2], indirect=True)
 def test_worker_success_and_standalone_verify_marks_are_honest(tts_url):
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_ok_marks_") as tmp:
@@ -483,7 +483,7 @@ def test_worker_success_and_standalone_verify_marks_are_honest(tts_url):
 def test_worker_reports_cache_facts_across_runs(tts_url):
     """冷缓存全生成、热缓存零 TTS、单段旁白改动只重配一段、--no-reuse-audio
     全量重跑 mode=regenerate 且检查 5 显式跳过不假通过。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_cache_") as tmp:
@@ -526,7 +526,7 @@ def _png_mtimes(preview_dir):
 def test_skip_preview_reuses_this_run_preview(tts_url):
     """--skip-preview 复用同 run_key 目录里刚验过的截图：不重写产物、仍出成片；
     不传该开关则自行重截。--preview 与 --skip-preview 互斥。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_skip_") as tmp:
@@ -565,6 +565,34 @@ def test_skip_preview_reuses_this_run_preview(tts_url):
         assert r.returncode != 0
 
 
+def test_worker_maps_preview_reuse_rejection_to_preview_stage(monkeypatch, capsys):
+    """Step 3 复用被拒（make_video exit 4）必须归 PREVIEW 阶段。
+
+    报成 FAIL_AT_RENDER 会把人引去查编码，实际该重跑预览（#26 AC2）。
+    """
+    import render_worker as rw
+
+    sb = str(ROOT / "examples" / "what_is_harness.json")
+
+    def fake_run(argv):
+        if argv[0].endswith("worker_preflight.py"):
+            return 0, "PREFLIGHT_OK"
+        if "--preview" in argv:  # Step 2 通过；Step 3 传的是 --skip-preview
+            return 0, "PREVIEW_OK"
+        return 4, "PREVIEW FAILED:\n - 未找到已通过的预览报告"
+
+    monkeypatch.setattr(rw, "run_script", fake_run)
+    monkeypatch.setattr(
+        sys, "argv", ["render_worker.py", sb, "out/x.mp4", "--reuse-audio"]
+    )
+    with pytest.raises(SystemExit) as exc:
+        rw.main()
+    assert exc.value.code == rw.wr.STAGE_EXITS["PREVIEW"] == 2
+    out = capsys.readouterr().out
+    assert "FAIL_AT_PREVIEW" in out
+    assert "FAIL_AT_RENDER" not in out
+
+
 # ---- #23 并行换皮自动独立成片（自动命名防重合）----
 
 
@@ -577,7 +605,7 @@ def _artifact_of(stdout):
 @pytest.mark.parametrize("tts_url", [0.2], indirect=True)
 def test_worker_three_skins_parallel_auto_outputs(tts_url):
     """同一分镜三种皮肤省略 output 真并行：三个不同可播成片，验收互不污染。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_par3_") as tmp:
@@ -614,7 +642,7 @@ def test_worker_three_skins_parallel_auto_outputs(tts_url):
 @pytest.mark.parametrize("tts_url", [0.2], indirect=True)
 def test_worker_auto_naming_no_sanitize_collision(tts_url):
     """皮肤名规范化会重合（"a b" 与 "a_b"）→ 自动输出必须仍不同。"""
-    browser = find_browser()
+    browser = browser_path()
     if not browser:
         pytest.skip("no Chrome/Edge available")
     with tempfile.TemporaryDirectory(prefix="mv_name_col_") as tmp:

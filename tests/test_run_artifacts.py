@@ -60,6 +60,50 @@ def test_run_key_stable_and_discriminating():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_run_key_includes_template_contents():
+    """模板/皮肤内容也要参与 run 标识。
+
+    画面同时取决于分镜和 templates/，只按分镜定 key 时改模板不会换目录，
+    `--skip-preview` 就会复用按旧模板验过的预览（#26 AC3）。
+    """
+    d = _mkdtemp("ra_tpl_")
+    try:
+        root = os.path.join(d, "repo")
+        tdir = os.path.join(root, "templates")
+        os.makedirs(tdir)
+        tpl_path = os.path.join(tdir, "layout-rule.html")
+        with open(tpl_path, "w", encoding="utf-8") as f:
+            f.write("<div>__BODY__</div>")
+        sb = _write_sb(os.path.join(d, "lesson.json"))
+
+        k1 = ra.run_key(sb, "teaching", True, root)
+        assert k1 == ra.run_key(sb, "teaching", True, root)  # 内容不变 → 稳定
+        # 分镜/style/motion 全不动，只改模板 → key 必须变
+        with open(tpl_path, "w", encoding="utf-8") as f:
+            f.write('<div class="x">__BODY__</div>')
+        assert k1 != ra.run_key(sb, "teaching", True, root)
+        # 新增一个本次没用到的模板也换 key（保守失效，不漏失效）
+        with open(os.path.join(tdir, "layout-answer.html"), "w", encoding="utf-8") as f:
+            f.write("<div>__BODY__</div>")
+        assert k1 != ra.run_key(sb, "teaching", True, root)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_locate_run_uses_the_same_root_for_templates():
+    """locate_run 把 root 同时用于 _build 与模板目录，两个入口不会各解析一次。"""
+    d = _mkdtemp("ra_loc_")
+    try:
+        root = os.path.join(d, "repo")
+        os.makedirs(os.path.join(root, "templates"))
+        sb = _write_sb(os.path.join(d, "lesson.json"))
+        rdir = ra.locate_run(root, sb, "teaching", True)
+        assert rdir.startswith(os.path.join(root, "_build", "runs"))
+        assert rdir.endswith(ra.run_key(sb, "teaching", True, root))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_run_dir_layout_and_style_sanitized():
     d = _mkdtemp("ra_dir_")
     try:
@@ -86,6 +130,60 @@ def test_manifest_roundtrip():
         assert ra.read_manifest(rdir) is None  # 缺失 → None
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_make_manifest_field_set_is_the_contract():
+    """字段集是接口：生产者、两个读者与测试夹具共用这一个形状。
+
+    夹具曾手写 dict 而与生产者漂移（多 run_key/slug、少七个字段），这条把它钉住。
+    """
+    m = ra.make_manifest(
+        style_name="teaching", motion_enabled=True, fps=30, W=1280, H=720,
+        storyboard="/s.json", mp4="/o.mp4", expected_duration=1.0, scenes=[],
+    )
+    assert set(m) == {
+        "schema", "style_name", "motion_enabled", "fps", "W", "H",
+        "storyboard", "mp4", "expected_duration",
+        "tts_generated", "tts_reused", "reuse_mode", "scenes",
+    }
+    assert m["schema"] == ra.MANIFEST_SCHEMA
+    # 缺省即事实：不传 tts_* 时是「本次零生成/零复用」而不是缺字段
+    assert (m["tts_generated"], m["tts_reused"], m["reuse_mode"]) == (0, 0, "reuse")
+
+
+def test_is_current_manifest_gates_on_schema():
+    assert ra.is_current_manifest({"schema": ra.MANIFEST_SCHEMA}) is True
+    assert ra.is_current_manifest({"schema": 999}) is False
+    assert ra.is_current_manifest({}) is False
+    assert ra.is_current_manifest(None) is False
+
+
+def test_tts_facts_none_for_old_manifest():
+    """旧产物没有 tts_* 字段 → None（读者据此显示 (none)，不瞎报 0）。"""
+    old = {"schema": ra.MANIFEST_SCHEMA, "scenes": []}
+    assert ra.tts_facts(old) is None
+    assert ra.tts_facts({"schema": 999, "tts_generated": 1}) is None
+    assert ra.tts_facts(None) is None
+
+    fresh = ra.make_manifest(
+        style_name="t", motion_enabled=True, fps=30, W=1280, H=720,
+        storyboard="/s.json", mp4="/o.mp4", expected_duration=1.0, scenes=[],
+        tts_generated=2, tts_reused=5, reuse_mode="reuse",
+    )
+    assert ra.tts_facts(fresh) == (2, 5, "reuse")
+
+
+def test_scene_wavs_is_the_authoritative_list():
+    """音轨清单只从 manifest 来；不可用时返回空，由调用方判失败（不猜文件名）。"""
+    assert ra.scene_wavs(None) == []
+    assert ra.scene_wavs({"schema": 999, "scenes": [{"wav": "x.wav"}]}) == []
+    assert ra.scene_wavs({"schema": ra.MANIFEST_SCHEMA, "scenes": []}) == []
+    m = ra.make_manifest(
+        style_name="t", motion_enabled=True, fps=30, W=1280, H=720,
+        storyboard="/s.json", mp4="/o.mp4", expected_duration=1.0,
+        scenes=[{"i": 0, "wav": "/a.wav"}, {"i": 1, "wav": "/b.wav"}],
+    )
+    assert ra.scene_wavs(m) == ["/a.wav", "/b.wav"]
 
 
 def test_manifest_concurrent_writes_never_torn():
@@ -122,9 +220,9 @@ def test_manifest_concurrent_writes_never_torn():
 
 @pytest.fixture(scope="session")
 def ffmpeg():
-    from make_video import FFMPEG
+    from toolchain import ffmpeg_path
 
-    return FFMPEG
+    return ffmpeg_path()
 
 
 @pytest.fixture
@@ -134,6 +232,11 @@ def project():
         shutil.copytree(
             os.path.join(ROOT, "scripts"), os.path.join(d, "proj", "scripts"),
             ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        # templates/ 也复制：run_key 含模板内容，项目根缺模板会让测试与
+        # worker_verify 子进程解析出不同的 key（夹具应像真实项目根一样完整）
+        shutil.copytree(
+            os.path.join(ROOT, "templates"), os.path.join(d, "proj", "templates"),
         )
         yield os.path.join(d, "proj")
     finally:
@@ -160,27 +263,33 @@ def _make_mp4(ffmpeg, path, seconds):
 
 
 def _write_manifest_for(proj_root, sb_path, wav, seconds):
-    """以项目为 ROOT 写一份与渲染器同构的 manifest（schema/字段一致）。"""
-    rdir = os.path.join(
-        str(proj_root), "_build", "runs",
-        f"lesson__teaching__{ra.run_key(str(sb_path), 'teaching', True)}",
-    )
+    """以项目为 ROOT 写一份与渲染器同构的 manifest。
+
+    走 ra.make_manifest，所以夹具的形状只能等于生产者的形状——先前手写 dict 时
+    夹具多写了 run_key/slug、漏了 W/H/storyboard/mp4/tts_* 七个字段。
+    """
+    rdir = ra.locate_run(str(proj_root), str(sb_path), "teaching", True)
     os.makedirs(rdir, exist_ok=True)
     ra.write_manifest(
         rdir,
-        {
-            "schema": ra.MANIFEST_SCHEMA,
-            "run_key": ra.run_key(str(sb_path), "teaching", True),
-            "slug": "lesson",
-            "style_name": "teaching",
-            "motion_enabled": True,
-            "fps": 2,
-            "expected_duration": seconds,
-            "scenes": [{"i": 0, "voice": "mimo_default", "narrate": "N",
-                        "fp": "0" * 8, "raw": str(wav), "wav": os.path.abspath(wav),
-                        "duration": seconds, "frames": 4, "narr_frames": 4,
-                        "hold": 0.0}],
-        },
+        ra.make_manifest(
+            style_name="teaching",
+            motion_enabled=True,
+            fps=2,
+            W=1280,
+            H=720,
+            storyboard=os.path.abspath(sb_path),
+            mp4=os.path.abspath(os.path.join(os.path.dirname(sb_path), "lesson.mp4")),
+            expected_duration=seconds,
+            scenes=[{
+                "i": 0, "voice": "mimo_default", "narrate": "N", "fp": "0" * 8,
+                "raw": str(wav), "wav": os.path.abspath(wav), "duration": seconds,
+                "frames": 4, "narr_frames": 4, "hold": 0.0, "cache": "tts",
+            }],
+            tts_generated=1,
+            tts_reused=0,
+            reuse_mode="regenerate",
+        ),
     )
     return rdir
 

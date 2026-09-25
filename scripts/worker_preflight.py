@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 
+import toolchain as tc  # 纯 stdlib：只找浏览器，不拉媒体管线
 from storyboard_gate import load_env
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,7 +30,7 @@ def main():
     )
     ap.add_argument("storyboard", help="分镜 JSON 路径")
     ap.add_argument(
-        "--browser", default=None, help="浏览器可执行文件路径（透传 find_browser）"
+        "--browser", default=None, help="浏览器可执行文件路径（透传 toolchain.browser_path）"
     )
     args = ap.parse_args()
 
@@ -57,12 +58,7 @@ def main():
     # 4. 浏览器可发现（时点检查：假设 preflight→render 期间路径不变；
     #    真失效时 make_video exit 3 仍按映射表归 FAIL_AT_PREFLIGHT）
     try:
-        from make_video import find_browser
-
-        browser = find_browser(args.browser)
-    except ImportError as e:
-        print(f"preflight FAIL: 无法导入 make_video.find_browser: {e}", file=sys.stderr)
-        sys.exit(1)
+        browser = tc.browser_path(args.browser)
     except FileNotFoundError as e:
         print(f"preflight FAIL: {e}", file=sys.stderr)
         print("  请检查 --browser 路径，或安装 Chrome/Edge 后重试。", file=sys.stderr)

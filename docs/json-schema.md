@@ -31,7 +31,7 @@
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
-| hold | practice | ≥5.0（样例 5.0）；提供思考静音，**旁白不要口播「想几秒」** |
+| hold | practice | ≥5.0 的有限数字（样例 5.0）；显式 `null`/空串/负数按非法输入报错；提供思考静音，**旁白不要口播计时**（「想几秒」「接下来三秒」等） |
 | zh | | example/mistake 说明（缺省用 sub） |
 | think | | practice 提示语；缺省「先想一想，别急着看答案」（仅画面，不进 TTS）；空字符串隐藏提示与间距 |
 
@@ -99,5 +99,6 @@
 - layout = 结构槽 `__HEADER__` / `__BODY__` / `__THINK__`（仅 practice） / … + 居中构图
 - *闸门*：`py scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=5.0`；exit 0）
 - 预览：`py scripts/make_video.py <json> --preview`（缩略图 + 溢出）；全量渲染会先跑同一预览，通过后再 TTS
+- `--skip-preview` 复用同 run 目录已通过的 `overflow.json`（页数/顺序/kind/分镜指纹一致且无溢出、无占位符错误）；任一不符即停且不配音（exit 4）。run 目录由分镜字节 + style + motion 开关 + `templates/` 内容决定，改模板或分镜即换目录
 
 > Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默失败、零输出）；macOS/Linux 用 `python3`。

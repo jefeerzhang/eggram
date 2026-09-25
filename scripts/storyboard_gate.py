@@ -18,72 +18,142 @@ import json
 import math
 import os
 import re
+from collections import namedtuple
 
 from charts import resolve_chart
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(ROOT, "templates")
 
-LAYOUT_FILES = {
-    "title": "layout-title.html",
-    "rule": "layout-rule.html",
-    "diagram": "layout-diagram.html",
-    "example": "layout-example.html",
-    "mistake": "layout-mistake.html",
-    "practice": "layout-practice.html",
-    "answer": "layout-answer.html",
-    "summary": "layout-summary.html",
-}
-# 排版变体：kind → {variant_id → layout_file}
-LAYOUT_VARIANTS = {
-    "rule": {
-        "side": "layout-rule-side.html",
-        "formula": "layout-rule-formula.html",
-    },
-    "example": {
-        "side": "layout-example-side.html",
-    },
-}
-# 变体适用槽位要求：在 kind 基础槽位之上，变体额外必须提供的槽位。
-# 未知或缺失变体回退默认布局，故只校验实际存在的变体文件。
-LAYOUT_VARIANT_SLOTS = {
-    ("rule", "side"): ["__ZH__"],
-    ("rule", "formula"): ["__FORMULA_MAIN__", "__PARTS__"],
-    ("example", "side"): ["__WRONG_BODY__"],
-}
-KIND_BADGE = {
-    "title": "",
-    "rule": "讲解",
-    "diagram": "图解",
-    "example": "例句",
-    "mistake": "易错",
-    "practice": "练习",
-    "answer": "揭晓",
-    "summary": "总结",
-}
-ROLE_TO_KIND = {
-    "learning_objective": "title",
-    "concept_anchor": "rule",
-    "visual_anchor": "diagram",
-    "worked_demo": "example",
-    "common_mistake": "mistake",
-    "understanding_check": "practice",
-    "check_reveal": "answer",
-    "recap": "summary",
-}
-KIND_TO_ROLE = {v: k for k, v in ROLE_TO_KIND.items()}
+# --- kind 注册表：一个 kind 的全部事实只在这里写一次 --------------------------
+# 加一个 page kind（SKILL.md 的既定流程）原先要改九张并行表，漏一处有三种不同的
+# 失败方式：_OVERFLOW_SELECTORS_BY_KIND[kind] 是硬索引，要等预览阶段才 KeyError；
+# _ARC_PHASE.get(k) 静默 continue，教学弧检查被绕过；KIND_BADGE/KIND_MOTION 用
+# .get 静默降级。现在每个 kind 一条记录，下面所有视图都由它派生，漏填即报错。
+#
+# needs：本 kind 布局必须提供的槽位。variants / variant_slots：排版变体与其额外槽位。
+KindSpec = namedtuple(
+    "KindSpec",
+    "role layout badge motion arc_phase needs variants variant_slots overflow_selectors",
+)
 
-# 默认动效：提醒注意力，不做花哨转场
-KIND_MOTION = {
-    "title": "zoom_in",
-    "rule": "focus",
-    "diagram": "focus",
-    "example": "focus",
-    "mistake": "pulse",
-    "practice": "pulse",
-    "answer": "zoom_in",
-    "summary": "zoom_out",
+KIND_REGISTRY = {
+    "title": KindSpec(
+        role="learning_objective",
+        layout="layout-title.html",
+        badge="",
+        motion="zoom_in",
+        arc_phase=0,
+        needs=["__HEADER__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[".big", ".sub"],
+    ),
+    "rule": KindSpec(
+        role="concept_anchor",
+        layout="layout-rule.html",
+        badge="讲解",
+        motion="focus",
+        arc_phase=1,
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__"],
+        variants={"side": "layout-rule-side.html", "formula": "layout-rule-formula.html"},
+        variant_slots={"side": ["__ZH__"], "formula": ["__FORMULA_MAIN__", "__PARTS__"]},
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".body", ".formula", ".formula-frac",
+            ".formula-num", ".formula-den", ".step-text", ".example-text", ".hl", ".err",
+        ],
+    ),
+    "diagram": KindSpec(
+        role="visual_anchor",
+        layout="layout-diagram.html",
+        badge="图解",
+        motion="focus",
+        arc_phase=1,  # 图解归属于概念锚点阶段
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__CHART__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err",
+        ],
+    ),
+    "example": KindSpec(
+        role="worked_demo",
+        layout="layout-example.html",
+        badge="例句",
+        motion="focus",
+        arc_phase=2,
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
+        variants={"side": "layout-example-side.html"},
+        variant_slots={"side": ["__WRONG_BODY__"]},
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".err",
+        ],
+    ),
+    "mistake": KindSpec(
+        role="common_mistake",
+        layout="layout-mistake.html",
+        badge="易错",
+        motion="pulse",
+        arc_phase=3,
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[".title", ".badge", ".sub", ".q", ".why", ".hl", ".err"],
+    ),
+    "practice": KindSpec(
+        role="understanding_check",
+        layout="layout-practice.html",
+        badge="练习",
+        motion="pulse",
+        arc_phase=4,
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__THINK__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[".title", ".badge", ".sub", ".q", ".think", ".err"],
+    ),
+    "answer": KindSpec(
+        role="check_reveal",
+        layout="layout-answer.html",
+        badge="揭晓",
+        motion="zoom_in",
+        arc_phase=5,
+        needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".err",
+        ],
+    ),
+    "summary": KindSpec(
+        role="recap",
+        layout="layout-summary.html",
+        badge="总结",
+        motion="zoom_out",
+        arc_phase=6,
+        needs=["__BODY__", "__SUB__"],
+        variants={},
+        variant_slots={},
+        overflow_selectors=[".sum", ".next", ".hl"],
+    ),
 }
+
+# --- 由注册表派生的视图（保留原名：调用方与测试消费这些名字）-------------------
+LAYOUT_FILES = {k: s.layout for k, s in KIND_REGISTRY.items()}
+LAYOUT_VARIANTS = {k: dict(s.variants) for k, s in KIND_REGISTRY.items() if s.variants}
+LAYOUT_VARIANT_SLOTS = {
+    (k, v): list(slots)
+    for k, s in KIND_REGISTRY.items()
+    for v, slots in s.variant_slots.items()
+}
+KIND_BADGE = {k: s.badge for k, s in KIND_REGISTRY.items()}
+KIND_MOTION = {k: s.motion for k, s in KIND_REGISTRY.items()}
+ROLE_TO_KIND = {s.role: k for k, s in KIND_REGISTRY.items()}
+KIND_TO_ROLE = {k: s.role for k, s in KIND_REGISTRY.items()}
+_OVERFLOW_SELECTORS_BY_KIND = {
+    k: list(s.overflow_selectors) for k, s in KIND_REGISTRY.items()
+}
+_ARC_PHASE = {k: s.arc_phase for k, s in KIND_REGISTRY.items()}
+
 MOTIONS = ("none", "focus", "pulse", "zoom_in", "zoom_out")
 
 # 注入到每页：用 CSS 变量驱动，逐帧 evaluate 更新（避免每帧 set_content）
@@ -150,13 +220,13 @@ ICONS = {
 _ICON_TOKEN_RE = re.compile(r"\[(\w+)\]")
 
 PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
-# practice 旁白禁止口播「思考计时」：停顿只靠 hold，提示只写 think（画面）
-_PRACTICE_HOLD_CUE_RE = re.compile(
-    r"我想\s*[一二三四五六七八九十两\d]*\s*秒"
-    r"|想\s*[一二三四五六七八九十两\d]+\s*秒钟?"
-    r"|想三秒钟|想五秒钟"
-    r"|想一下"
-    r"|想一想[。！？]?$"
+# practice 旁白禁止口播「思考计时」：停顿只靠 hold，提示只写 think（画面）。
+# 判据取「量词+秒」而不是「想」前缀——旧写法只拦「想×秒」，漏掉同义的
+# 「接下来三秒」「给你三秒钟时间分析」；「想一下 / 想一想」另列，且不加 $ 锚点，
+# 句中出现的同样要拦。
+_PRACTICE_THINK_ALOUD_RE = re.compile(
+    r"[一二三四五六七八九十两半几\d]+\s*秒钟?"
+    r"|想一下|想一想|想想看"
 )
 # 仅拦样式 hex token；不拦纯数字——教学文本里「100 米」「5 个动作」常见，误伤面太大。
 LEAK_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
@@ -206,12 +276,87 @@ def resolve_voice(sc, tpl):
     return default_voice
 
 
+def resolve_style_name(tpl, explicit=None):
+    """最终皮肤名：显式参数 > 分镜顶层 style > teaching。
+
+    三个入口共用这一条：prepare_storyboard（真正决定用哪套皮肤）与两个 CLI
+    （用它定位本次 run 目录）。各拼一遍的话，一旦分歧就表现为验收报
+    「本次运行没有 manifest」——看起来像没渲染，其实是默认值不一致。
+    """
+    if explicit:
+        return explicit
+    if isinstance(tpl, dict):
+        return tpl.get("style", "teaching")
+    return "teaching"
+
+
+# 皮肤必须提供的 token——唯一声明处。palette 缺 key 原先静默变成空字符串（屏幕上
+# 就是没颜色），typography 缺 key 直接 KeyError：同一类错误两种待遇。这里声明一次，
+# load_style 统一校验，于是「加一个皮肤」要么加载成功、要么给出可读错误。
+# 带默认值的 palette key（warning/info/highlight/muted/practice_fill）与 exercise
+# 整段都是可选覆盖，不入必填表。
+STYLE_REQUIRED_PALETTE_KEYS = (
+    "bg",
+    "bg_grad2",
+    "surface",
+    "surface_border",
+    "ink",
+    "ink_sub",
+    "accent",
+    "correct",
+    "wrong",
+)
+STYLE_REQUIRED_TYPOGRAPHY_KEYS = (
+    "family",
+    "title_size",
+    "body_size",
+    "sub_size",
+    "badge_size",
+)
+
+
+def validate_style(style, source="<style>"):
+    """皮肤 token 校验：返回错误列表，空表示通过。
+
+    palette 的必填值还要求是可用颜色（非空字符串，或带 hex 的对象）——只有 key
+    在、值是数字之类的情况，_palette_hex 一样会静默给空串。
+    """
+    errors = []
+    palette = style.get("palette")
+    typography = style.get("typography")
+    if not isinstance(palette, dict):
+        errors.append(f"{source}: 缺 palette 段或不是对象")
+    else:
+        missing = [k for k in STYLE_REQUIRED_PALETTE_KEYS if k not in palette]
+        if missing:
+            errors.append(f"{source}: palette 缺 token: {', '.join(missing)}")
+        for k in STYLE_REQUIRED_PALETTE_KEYS:
+            v = palette.get(k)
+            if isinstance(v, dict):
+                v = v.get("hex")
+            if not isinstance(v, str) or not v.strip():
+                errors.append(
+                    f"{source}: palette.{k} 须为非空颜色字符串或 {{hex}} 对象"
+                )
+    if not isinstance(typography, dict):
+        errors.append(f"{source}: 缺 typography 段或不是对象")
+    else:
+        missing = [k for k in STYLE_REQUIRED_TYPOGRAPHY_KEYS if k not in typography]
+        if missing:
+            errors.append(f"{source}: typography 缺 token: {', '.join(missing)}")
+    return errors
+
+
 def load_style(style_name="teaching"):
     path = os.path.join(TEMPLATE_DIR, f"style-{style_name}.json")
     if not os.path.isfile(path):
         raise FileNotFoundError(f"风格文件不存在: {path}")
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        style = json.load(f)
+    errors = validate_style(style, source=os.path.basename(path))
+    if errors:
+        raise ValueError("；".join(errors))
+    return style
 
 
 def _palette_hex(palette, key, default=""):
@@ -405,10 +550,16 @@ def ease_out_cubic(t):
     return 1.0 - (1.0 - t) ** 3
 
 
+# 动效状态：一个值带着自己的通道，而不是三个裸位置参数靠 * 展开传递。
+# 是 tuple 子类，所以既有的「== (1.0, 1.0, 0.0)」断言与 [0] 取值照旧成立；
+# 新增一个通道（如公式页的公式变量）时，改动落在这一处与 apply_motion_css_vars。
+MotionState = namedtuple("MotionState", "scale hl glow")
+
+
 def motion_vars(effects, elapsed_seconds, duration_seconds):
-    """返回 (--m-scale, --m-hl, --m-glow)。elapsed/duration/delay 均以秒计。
+    """返回 MotionState（scale / hl / glow）。elapsed/duration/delay 均以秒计。
     延迟后在剩余旁白时间内完成动效，旁白结束后（elapsed≥duration）冻结在末态；
-    delay ≥ duration（延迟不早于旁白结束）不启动。多动效叠加：scale/hl/glow 各取最大值。"""
+    delay ≥ duration（延迟不早于旁白结束）不启动。多动效叠加：各通道取最大值。"""
     duration_seconds = max(0.0, float(duration_seconds))
     elapsed_seconds = max(0.0, min(duration_seconds, float(elapsed_seconds)))
     max_scale, max_hl, max_glow = 1.0, 1.0, 0.0
@@ -423,28 +574,28 @@ def motion_vars(effects, elapsed_seconds, duration_seconds):
         max_scale = max(max_scale, s)
         max_hl = max(max_hl, h)
         max_glow = max(max_glow, g)
-    return max_scale, max_hl, max_glow
+    return MotionState(max_scale, max_hl, max_glow)
 
 
 def _single_motion_vars(motion, t):
-    """单动效计算。"""
+    """单动效计算，返回 MotionState。"""
     if motion == "none":
-        return 1.0, 1.0, 0.0
+        return MotionState(1.0, 1.0, 0.0)
     if motion == "zoom_in":
-        return 1.0 + 0.055 * ease_out_cubic(t), 1.0, 0.0
+        return MotionState(1.0 + 0.055 * ease_out_cubic(t), 1.0, 0.0)
     if motion == "zoom_out":
-        return 1.06 - 0.06 * ease_out_cubic(t), 1.0, 0.0
+        return MotionState(1.06 - 0.06 * ease_out_cubic(t), 1.0, 0.0)
     if motion == "focus":
         s = 1.0 + 0.028 * ease_out_cubic(min(t * 1.6, 1.0))
         if t < 0.45:
             pulse = math.sin((t / 0.45) * math.pi)
         else:
             pulse = 0.22
-        return s, 1.0 + 0.14 * pulse, 0.55 * pulse
+        return MotionState(s, 1.0 + 0.14 * pulse, 0.55 * pulse)
     if motion == "pulse":
         pulse = 0.55 + 0.45 * math.sin(t * math.pi * 2.0)
-        return 1.0 + 0.012 * pulse, 1.0 + 0.16 * pulse, 0.5 * pulse
-    return 1.0, 1.0, 0.0
+        return MotionState(1.0 + 0.012 * pulse, 1.0 + 0.16 * pulse, 0.5 * pulse)
+    return MotionState(1.0, 1.0, 0.0)
 
 
 def frame_motion_state(effects, frame, fps, narr_frames):
@@ -493,11 +644,13 @@ def formula_motion_vars(parts, elapsed_seconds, duration_seconds):
     return {**landed, "frac_bar": 1.0, "active_part": ids[idx]}
 
 
-def apply_motion_css_vars(page, scale, hl, glow, formula=None):
-    """写本页动效 CSS 变量。formula 传 formula_motion_vars 的产物时叠加公式页
-    分步动效；传 None 表示该页无公式动效，五个变量一律回到末态——同一个 page
-    跨场景复用，不重置会把上一个公式页的残值带到下一页。
+def apply_motion_css_vars(page, state, formula=None):
+    """写本页动效 CSS 变量。state 是 motion_vars / frame_motion_state 的产物
+    （MotionState）。formula 传 formula_motion_vars 的产物时叠加公式页分步动效；
+    传 None 表示该页无公式动效，五个变量一律回到末态——同一个 page 跨场景复用，
+    不重置会把上一个公式页的残值带到下一页。
     """
+    scale, hl, glow = state
     page.evaluate(
         """([s, h, g, f]) => {
           const b = document.body;
@@ -586,8 +739,18 @@ def formula_parts_for_motion(sc):
     return parts if isinstance(parts, list) and parts else None
 
 
-def render_html(sc, W, H, style, motion_enabled=True):
-    """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。"""
+# 渲染配置：一次准备、一处传递。原先 (W, H, style, motion_enabled) 作为散参数穿过
+# render_html / run_preview 的每个调用点，每点都要自己重拼一遍（测试里十几个点还要
+# 重新 load_style 读盘）。prepare_storyboard 本来就产出这些值，现在包成一个值传下去。
+RenderConfig = namedtuple("RenderConfig", "W H style fps motion_enabled style_name")
+
+
+def render_html(sc, cfg):
+    """教学页 HTML；动效由 CSS 变量在截帧时驱动。无进度条/帧号。
+
+    cfg 是 prepare_storyboard 产出的 RenderConfig（W/H/style/motion_enabled）。
+    """
+    W, H, style, motion_enabled = cfg.W, cfg.H, cfg.style, cfg.motion_enabled
     kind = resolve_kind(sc)
     layout_variant = sc.get("layout_variant")
     html = inject_style(load_layout(kind, layout_variant), style)
@@ -652,21 +815,9 @@ def render_html(sc, W, H, style, motion_enabled=True):
 
 
 def _layout_needs(kind):
-    """kind 的基础槽位要求（validate_layouts 与变体共用）。"""
-    need = ["__HEADER__"] if kind == "title" else ["__HEADER__", "__BODY__"]
-    if kind in ("rule", "diagram", "example", "mistake", "practice", "answer"):
-        need += ["__SUB__", "__BADGE__"]
-    if kind == "diagram":
-        need.append("__CHART__")
-    if kind == "summary":
-        need = ["__BODY__", "__SUB__"]
-    if kind == "example":
-        need.append("__ZH__")
-    if kind == "mistake":
-        need.append("__ZH__")
-    if kind == "practice":
-        need.append("__THINK__")
-    return need
+    """kind 的基础槽位要求（validate_layouts 与变体共用）。取自 kind 注册表：
+    未知 kind 直接 KeyError，而不是悄悄套用一份默认槽位表。"""
+    return list(KIND_REGISTRY[kind].needs)
 
 
 def _check_layout_file(fn, raw, need, errors):
@@ -775,9 +926,9 @@ def validate_storyboard(tpl):
             warnings.append(
                 f"voices.{role_id}={vname!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
             )
-    fps = tpl.get("fps", 30)
-    if isinstance(fps, bool) or not isinstance(fps, int) or fps <= 0:
-        errors.append(f"fps 须为正整数（当前 {fps!r}）；缺省 30")
+    fps, fps_err = parse_positive_px(tpl.get("fps", 30), 30, "fps")
+    if fps_err:
+        errors.append(fps_err)
     scenes = tpl.get("scenes") or []
     if not scenes:
         errors.append("scenes 为空")
@@ -867,24 +1018,31 @@ def validate_storyboard(tpl):
                 )
             if not (sc.get("zh") or sc.get("sub")):
                 errors.append(f"{prefix}: mistake 须有 sub/zh 说明「为什么容易错」")
-        if "hold" in sc or kind == "practice":
-            hold_v = parse_seconds(sc.get("hold", 0))
-            if hold_v is None:
-                errors.append(f"{prefix}: hold={sc.get('hold')!r} 须为有限数字")
-            elif kind == "practice" and hold_v < 5.0:
-                errors.append(
-                    f"{prefix}: practice hold={hold_v} 须 >= 5.0（docs/teaching-method.md）"
-                )
+        hold_v, hold_err = None, None
+        if "hold" in sc:
+            hold_v, hold_err = parse_seconds(sc.get("hold"))
+            if hold_err:
+                errors.append(f"{prefix}: {hold_err}")
+            elif hold_v < 0:
+                hold_err = f"hold={hold_v} 不得为负"
+                errors.append(f"{prefix}: {hold_err}")
         if kind == "practice":
+            if "hold" not in sc:
+                hold_v = 0.0  # 缺 hold 的 practice 按 0 处理，下面报下限
+            if hold_err is None and hold_v is not None and hold_v < 5.0:
+                errors.append(
+                    f"{prefix}: practice hold>=5.0（当前 {hold_v}，"
+                    f"docs/teaching-method.md）"
+                )
             if "**" not in sc.get("body", ""):
                 errors.append(
                     f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
                 )
             narr = sc.get("narrate") or ""
-            if _PRACTICE_HOLD_CUE_RE.search(narr):
+            if _PRACTICE_THINK_ALOUD_RE.search(narr):
                 errors.append(
-                    f"{prefix}: practice 旁白禁止报思考时间"
-                    f"（如「想一下」「我想五秒」「想三秒钟」）；"
+                    f"{prefix}: practice 旁白禁止口播思考计时"
+                    f"（如「接下来三秒」「给你三秒钟」「想一下」）；"
                     f"停顿只靠 hold，提示只写 think 字段"
                 )
         if kind == "answer":
@@ -959,55 +1117,40 @@ def validate_rendered_html(html, scene_index):
     return errs
 
 
-# 关键内容槽选择器（与 templates/layout-*.html 同步）。仅用于 preview 溢出探测。
-# 按 kind 分组——layout 里 header 实际叫 .title/.big/.sum；mistake/practice/answer 的
-# 正文叫 .q（不是 .body）；中文槽按 layout 不同叫 .zh/.why/.think/.explain。
-_OVERFLOW_SELECTORS_BY_KIND = {
-    "title": [".big", ".sub"],
-    "rule": [
-        ".title",
-        ".badge",
-        ".sub",
-        ".body",
-        ".formula",
-        ".formula-frac",
-        ".formula-num",
-        ".formula-den",
-        ".step-text",
-        ".part-text",
-        ".example-text",
-        ".hl",
-        ".err",
-    ],
-    "diagram": [".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err"],
-    "example": [".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".err"],
-    "mistake": [".title", ".badge", ".sub", ".q", ".why", ".hl", ".err"],
-    "practice": [".title", ".badge", ".sub", ".q", ".think", ".err"],
-    "answer": [".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".err"],
-    "summary": [".sum", ".next", ".hl"],
-}
+# 关键内容槽选择器取自 KIND_REGISTRY（每个 kind 的 overflow_selectors），与
+# templates/layout-*.html 同步——layout 里 header 实际叫 .title/.big/.sum；
+# mistake/practice/answer 的正文叫 .q（不是 .body）；中文槽按 layout 叫 .zh/.why/.think。
+
+# 装饰性容器：overflow:hidden 只为圆角裁切，唯一子节点是 viewBox SVG（自适配盒
+# 尺寸，结构性不会 scroll 溢出）。视口越界仍要报，但「scroll 超出 client」在它们
+# 身上不代表文字丢失，不计入裁切——否则换一版图表内容就会误报。
+_CLIP_EXEMPT_SELECTORS = {".chart-container"}
 
 
-def parse_seconds(value):
-    """把 hold 收成有限秒数。空值当 0；bool / 非数字返回 None（闸门报错，不抛异常）。"""
-    if value is None or value == "":
-        return 0.0
-    if isinstance(value, bool):
-        return None
+def parse_seconds(value, name="hold"):
+    """把 hold 收成有限秒数，返回 (秒数, 错误文案)。
+
+    与 parse_positive_px 同一协议：无法解析时返回 (None, 文案) 由闸门汇总，不抛异常。
+    「缺省」由调用方的 `.get(key, 0)` 表达；显式 null / 空串视为非法输入（不是缺省）。
+    """
+    if isinstance(value, bool) or value is None or value == "":
+        return None, f"{name}={value!r} 须为有限数字"
     if isinstance(value, str):
         try:
             value = float(value.strip())
         except ValueError:
-            return None
+            return None, f"{name}={value!r} 须为有限数字"
     if isinstance(value, (int, float)) and math.isfinite(value):
-        return float(value)
-    return None
+        return float(value), None
+    return None, f"{name}={value!r} 须为有限数字"
 
 
 def parse_positive_px(value, default, name):
-    """宽高须为正整数。缺省用 default；非法时返回 (default, 错误文案)。"""
-    if value is None:
-        return default, None
+    """宽高 / fps 须为正整数，返回 (值, 错误文案)。
+
+    与 parse_seconds 同一协议；缺省由调用方的 `.get(key, default)` 表达。显式 null /
+    空串与 bool / 非 int / ≤0 一样报错——同一类输入不能两种待遇。
+    """
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return default, f"{name} 须为正整数（当前 {value!r}）；缺省 {default}"
     return value, None
@@ -1016,12 +1159,16 @@ def parse_positive_px(value, default, name):
 def preview_overflow(page, W, H, kind):
     """在已 set_content 的 page 上测关键槽是否溢出视口，或被自身 overflow 裁切。
 
-    返回 list[(selector, msg)]。按 kind 取 _OVERFLOW_SELECTORS_BY_KIND。
-    视口越界用盒子坐标；卡片内部裁字只在该槽 overflow 为 hidden/clip/scroll/auto
-    且 scroll 尺寸大于 client 时报告，避免把正常换行当成溢出。
+    返回 list[dict]，字段 sel / how / txt / msg（how ∈ {"viewport","clip"}）——
+    msg 是人读的诊断文案，txt 是被探测元素的文本；去重键取字段，不去解析 msg。
+
+    按 kind 取 _OVERFLOW_SELECTORS_BY_KIND。视口越界用盒子坐标，对所有选择器生效；
+    卡片内部裁字只在该槽 overflow 为 hidden/clip/scroll/auto、scroll 尺寸大于 client，
+    且不在 _CLIP_EXEMPT_SELECTORS 里时报告，避免把正常换行或圆角裁切当成溢出。
     """
     selectors = _OVERFLOW_SELECTORS_BY_KIND[kind]
-    js = """([W, H, sels]) => {
+    clip_sels = [s for s in selectors if s not in _CLIP_EXEMPT_SELECTORS]
+    js = """([W, H, sels, clipSels]) => {
         const out = [];
         const clips = (el) => {
             const s = getComputedStyle(el);
@@ -1037,7 +1184,7 @@ def preview_overflow(page, W, H, kind):
                 if (r.right > W + 0.5 || r.bottom > H + 0.5 || r.left < -0.5 || r.top < -0.5) {
                     out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, txt, 'viewport']);
                 }
-                if (clips(el) && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
+                if (clipSels.includes(sel) && clips(el) && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
                     out.push([sel, el.tagName, r.left, r.top, r.right, r.bottom, txt, 'clip']);
                 }
             }
@@ -1046,7 +1193,7 @@ def preview_overflow(page, W, H, kind):
     }"""
     out = []
     for sel, tag, left, top, right, bottom, txt, how in page.evaluate(
-        js, [W, H, selectors]
+        js, [W, H, selectors, clip_sels]
     ):
         if how == "clip":
             msg = (
@@ -1058,8 +1205,68 @@ def preview_overflow(page, W, H, kind):
                 f"{tag} {sel} 溢出视口 left={left:.0f} top={top:.0f} "
                 f"right={right:.0f} bottom={bottom:.0f}（viewport {W}x{H}），内容='{txt}'"
             )
-        out.append((sel, msg))
+        out.append({"sel": sel, "how": how, "txt": txt, "msg": msg})
     return out
+
+
+# --- 预览报告（overflow.json）契约 -------------------------------------------
+# 写入方 make_video.run_preview 与复用准入判定共用这里的构造点与判据：
+# 「什么算预览通过」只在本模块表达一次，改规则不会漏改另一处。
+
+
+def preview_report_entry(
+    i, kind, motion, png, findings, placeholder_errs, storyboard_fp
+):
+    """一份报告条目的唯一构造点（字段名只在这里出现）。"""
+    return {
+        "i": i,
+        "kind": kind,
+        "motion": motion,
+        "png": png,
+        "findings": findings,
+        "placeholder_errs": placeholder_errs,
+        "storyboard_fp": storyboard_fp,
+    }
+
+
+def preview_report_errors(report, scenes, storyboard_fp=None):
+    """按「什么算预览通过」判定一份报告，返回 (gate_errs, overflow_errs, binding_errs)。
+
+    - binding_errs：报告不可信——不是列表、页数不符、条目结构/顺序/kind 与本次分镜
+      不一致，或分镜指纹不符（显式 --preview-dir 指向别人的报告时挡住复用）。
+    - gate_errs：占位符闸门未过（run_preview 返回 2）。
+    - overflow_errs：溢出或裁切（run_preview 返回 1）。
+
+    两个消费方共用同一判据：run_preview 决定本次预览返回码；复用准入决定能否跳过
+    重截。storyboard_fp=None 表示不校验指纹（本次刚生成的报告无需自证）。
+    """
+    if not isinstance(report, list):
+        return [], [], ["预览报告不是列表"]
+    if len(report) != len(scenes):
+        return [], [], [f"预览报告页数 {len(report)} 与分镜 {len(scenes)} 不符"]
+    gate_errs, overflow_errs, binding_errs = [], [], []
+    for i, sc in enumerate(scenes):
+        item = report[i]
+        if not isinstance(item, dict):
+            binding_errs.append(f"scene {i} 预览记录不是对象")
+            continue
+        if item.get("i") != i:
+            binding_errs.append(f"scene {i} 预览记录顺序不符（i={item.get('i')!r}）")
+        kind = resolve_kind(sc)
+        if item.get("kind") != kind:
+            binding_errs.append(
+                f"scene {i} 预览 kind={item.get('kind')!r} 与分镜 {kind} 不符"
+            )
+        if item.get("placeholder_errs"):
+            gate_errs.extend(str(e) for e in item["placeholder_errs"])
+        if item.get("findings"):
+            overflow_errs.extend(str(f.get("msg", f)) for f in item["findings"])
+    if storyboard_fp is not None:
+        fps = {it.get("storyboard_fp") for it in report if isinstance(it, dict)}
+        if fps != {storyboard_fp}:
+            # 报告级判定，只报一条：条目级重复 9 次没有信息量
+            binding_errs.append("预览报告不属于本次分镜（指纹不符）")
+    return gate_errs, overflow_errs, binding_errs
 
 
 def _motion_probe_states(effects):
@@ -1075,17 +1282,9 @@ def _motion_probe_states(effects):
     return states
 
 
-# 教学弧相位（docs/teaching-method.md）：title → rule+ → (diagram) → example+ → (mistake) → practice → answer → summary
-_ARC_PHASE = {
-    "title": 0,
-    "rule": 1,
-    "diagram": 1,  # 图解归属于概念锚点阶段
-    "example": 2,
-    "mistake": 3,
-    "practice": 4,
-    "answer": 5,
-    "summary": 6,
-}
+# 教学弧相位取自 KIND_REGISTRY（每个 kind 的 arc_phase），口径见
+# docs/teaching-method.md：title → rule+ → (diagram) → example+ → (mistake) →
+# practice → answer → summary
 
 
 def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
@@ -1099,13 +1298,30 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
       render_html → validate_rendered_html（诊断带 scenes[i] 前缀）
     - 纯准备行为：不触浏览器/ffmpeg/TTS
 
-    返回 dict：errors、warnings、style、style_name、W、H、fps（原始值，闸门通过后
-    由渲染方转换）、scenes=[{i, sc, kind, variant, layout_file, motion, html}]。
+    返回 dict：errors、warnings、cfg=RenderConfig（W/H/style/fps/motion_enabled/
+    style_name）、scenes=[{i, sc, kind, variant, layout_file, motion, html}]。
     errors 非空时 scenes 条目字段可能残缺。
     """
-    style_name = style_name or tpl.get("style", "teaching")
-    style = load_style(style_name)
+    style_name = resolve_style_name(tpl, style_name)
     errors, warnings = [], []
+    try:
+        style = load_style(style_name)
+    except (FileNotFoundError, ValueError) as e:
+        # 皮肤缺失或 token 不全：报成闸门错误（CLI 会打印 VALIDATION FAILED 并 exit 2），
+        # 而不是让调用方吃一个 traceback。
+        return {
+            "errors": [f"style: {e}"],
+            "warnings": warnings,
+            "cfg": RenderConfig(
+                W=tpl.get("width", 1280),
+                H=tpl.get("height", 720),
+                style={},
+                fps=tpl.get("fps", 30),
+                motion_enabled=bool(motion_enabled),
+                style_name=style_name,
+            ),
+            "scenes": [],
+        }
     W, werr = parse_positive_px(tpl.get("width", 1280), 1280, "width")
     H, herr = parse_positive_px(tpl.get("height", 720), 720, "height")
     if werr:
@@ -1116,6 +1332,14 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
     if motion_enabled is None:
         motion_enabled = resolve_motion_enabled(tpl)
     scenes = tpl.get("scenes") or []
+    cfg = RenderConfig(
+        W=W,
+        H=H,
+        style=style,
+        fps=fps_raw,
+        motion_enabled=bool(motion_enabled),
+        style_name=style_name,
+    )
 
     errors.extend(validate_layouts())
     sb_errs, sb_warns = validate_storyboard(tpl)
@@ -1136,7 +1360,7 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
         try:
             kind = resolve_kind(sc)
             motion = resolve_motion(sc, motion_enabled)
-            html = render_html(sc, W, H, style, motion_enabled=motion_enabled)
+            html = render_html(sc, cfg)
             entry.update(
                 kind=kind,
                 layout_file=resolve_layout_file(kind, sc.get("layout_variant")),
@@ -1149,10 +1373,6 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
     return {
         "errors": errors,
         "warnings": warnings,
-        "style": style,
-        "style_name": style_name,
-        "W": W,
-        "H": H,
-        "fps": fps_raw,
+        "cfg": cfg,
         "scenes": prepared,
     }

@@ -33,8 +33,10 @@
 
 ## 产物归属（run 目录，#22）
 
-一次渲染 = 一个 run：`run_key = sha256(分镜文件字节 + style + motion 开关)[:10]`，
-目录 `_build/runs/<slug>__<style>__<run_key>/`（`scripts/run_artifacts.py`）：
+一次渲染 = 一个 run：`run_key = sha256(分镜文件字节 + style + motion 开关 + templates/ 内容)[:10]`，
+目录 `_build/runs/<slug>__<style>__<run_key>/`（`scripts/run_artifacts.py`）。
+模板内容参与哈希：画面也取决于 layout / skin 文件，只按分镜定 key 会让改模板后
+`--skip-preview` 复用按旧模板验过的预览。
 
 - `preview/`：本次预览截图 + `overflow.json`
 - `audio/`：本次**加工音轨** `s{i}_{fp}.wav`（随 hold/fps 变化，不属于共享缓存）
@@ -46,9 +48,9 @@
 互不覆盖；同配置写同一路径靠原子写保证读方只见完整文件。
 
 验收（`worker_verify.py`）按相同口径重算 run_key 精确重定位 run、用 manifest 的
-本次实际音轨集合独立测量（±5% 双向容差）；manifest 缺失时回退旧版共享音轨
-`_build/<slug>/s{i}_{fp}.wav`（兼容迁移前产物）。正常/失败退出都不清理任何
-run 目录或历史产物。
+本次实际音轨集合独立测量（±5% 双向容差）。**manifest 缺失即检查 4 失败**，不回退到
+共享 raw 目录猜文件名——那会量到上一版或别的皮肤的音轨，比报错更糟；也不猜最近
+目录、不扫同名残留文件。正常/失败退出都不清理任何 run 目录或历史产物。
 
 ## 缓存使用事实（#24）
 

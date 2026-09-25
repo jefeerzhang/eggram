@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import make_video as mv  # noqa: E402
 import storyboard_gate as sg  # noqa: E402
+import toolchain as tc  # noqa: E402
 
 SAMPLE = os.path.join(ROOT, "examples", "now_progressing.json")
 
@@ -29,6 +30,22 @@ SAMPLE = os.path.join(ROOT, "examples", "now_progressing.json")
 def load_sample():
     with open(SAMPLE, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _cfg(style="teaching", W=1280, H=720, motion=True, fps=30):
+    """渲染配置：一处构造，测试点不再各自 load_style + 拼 1280/720。
+
+    style 收名字或已加载的 style 对象；皮肤文件只在这里读一次。
+    motion 默认 True，与 render_html 原先的默认值一致——需要关掉的点显式传 False。
+    """
+    return sg.RenderConfig(
+        W=W,
+        H=H,
+        style=style if isinstance(style, dict) else sg.load_style(style),
+        fps=fps,
+        motion_enabled=motion,
+        style_name=style if isinstance(style, str) else "teaching",
+    )
 
 
 def _minimal_layout(kind):
@@ -84,13 +101,13 @@ def test_escape_sub_sup_whitelist_and_literal_guards():
     # 正文里已写成转义形态的，不被二次还原成标签
     assert sg._escape("&lt;sub&gt;x&lt;/sub&gt;") == "&amp;lt;sub&amp;gt;x&amp;lt;/sub&amp;gt;"
     # highlight 路径同样保留下标
-    out = mv.highlight_body("夏普：**R<sub>p</sub>**", "rule")
+    out = sg.highlight_body("夏普：**R<sub>p</sub>**", "rule")
     assert "R<sub>p</sub>" in out
     assert "<span class=\"hl\">" in out
 
 
 def test_highlight_body_escapes_and_keeps_highlight():
-    out = mv.highlight_body("区间：**0<x<1**", "rule")
+    out = sg.highlight_body("区间：**0<x<1**", "rule")
     assert "区间：" in out
     assert '<span class="hl">0&lt;x&lt;1</span>' in out
     # 不生成真实 HTML 元素
@@ -99,7 +116,7 @@ def test_highlight_body_escapes_and_keeps_highlight():
 
 def test_highlight_body_does_not_create_input_element():
     body = "HTML 标签：**<span>** 与 <input>"
-    out = mv.highlight_body(body, "rule")
+    out = sg.highlight_body(body, "rule")
     assert "<input>" not in out
     assert "&lt;input&gt;" in out
     assert "&lt;span&gt;" in out
@@ -114,7 +131,7 @@ def test_render_html_escapes_header_sub_zh():
         "narrate": "n",
         "zh": "1 > 0",
     }
-    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    html = sg.render_html(sc, _cfg())
     assert "a&lt;b" in html
     assert "x &amp; y" in html
     assert "1 &gt; 0" in html
@@ -125,7 +142,7 @@ def test_render_html_escapes_header_sub_zh():
 
 
 def test_render_html_escape_practice_think_field():
-    style = mv.load_style("teaching")
+    style = sg.load_style("teaching")
     base = {
         "kind": "practice",
         "header": "h",
@@ -134,15 +151,15 @@ def test_render_html_escape_practice_think_field():
         "narrate": "n",
     }
     # 缺省沿用文案
-    assert "先想一想，别急着看答案" in mv.render_html(base, 1280, 720, style)
+    assert "先想一想，别急着看答案" in sg.render_html(base, _cfg(style))
     # 自定义文本（含特殊字符按字面显示）
     sc = dict(base, think="a < b & c")
-    html = mv.render_html(sc, 1280, 720, style)
+    html = sg.render_html(sc, _cfg(style))
     assert "a &lt; b &amp; c" in html
     assert "先想一想" not in html
     # 空字符串隐藏提示与间距
     sc2 = dict(base, think="")
-    html2 = mv.render_html(sc2, 1280, 720, style)
+    html2 = sg.render_html(sc2, _cfg(style))
     assert '<div class="think">' not in html2
     assert "先想一想" not in html2
 
@@ -156,12 +173,12 @@ def test_render_html_no_double_substitution():
         "body": "**B**",
         "narrate": "n",
     }
-    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    html = sg.render_html(sc, _cfg())
     assert "&#95;&#95;SUB&#95;&#95;" in html  # header 里的 __SUB__ 被中和，按字面显示
     assert (
         html.count("real") == 1
     )  # sub 槽注入一次，header 里的 __SUB__ 不会被替换成 real
-    assert not mv.validate_rendered_html(html, 0)  # 不产生残留占位符错误
+    assert not sg.validate_rendered_html(html, 0)  # 不产生残留占位符错误
 
 
 # ---- 02 WAV 解码 ----
@@ -212,11 +229,11 @@ def test_prepare_scene_audio_keeps_silence():
 
 
 def test_motion_probe_states_static_and_delayed_coverage():
-    assert mv._motion_probe_states([{"type": "none", "delay": 0}]) == [(0.0, 1.0)]
+    assert sg._motion_probe_states([{"type": "none", "delay": 0}]) == [(0.0, 1.0)]
     effects = [{"type": "zoom_in", "delay": 2}]
-    states = mv._motion_probe_states(effects)
+    states = sg._motion_probe_states(effects)
     # 不依赖真实旁白时长：延迟动效的初态与放大末态都必须落在采样状态内
-    scales = [mv.motion_vars(effects, e, d)[0] for e, d in states]
+    scales = [sg.motion_vars(effects, e, d)[0] for e, d in states]
     assert min(scales) == 1.0
     assert max(scales) == pytest.approx(1.055)
 
@@ -228,11 +245,11 @@ def test_frame_motion_state_matches_seconds_across_fps():
     effects = [{"type": "zoom_in", "delay": 2}]
     # 6 秒旁白：fps=2 → 12 帧，fps=30 → 180 帧；同一秒数状态一致（允许一帧量化）
     for fps, narr in ((2, 12), (30, 180)):
-        assert mv.frame_motion_state(effects, 0, fps, narr) == (1.0, 1.0, 0.0)
-        at_4s = mv.frame_motion_state(effects, int(4 * fps), fps, narr)
+        assert sg.frame_motion_state(effects, 0, fps, narr) == (1.0, 1.0, 0.0)
+        at_4s = sg.frame_motion_state(effects, int(4 * fps), fps, narr)
         assert at_4s[0] == pytest.approx(1.048125)
         # hold/尾垫帧（k ≥ narr_frames）冻结在末态
-        held = mv.frame_motion_state(effects, narr + fps, fps, narr)
+        held = sg.frame_motion_state(effects, narr + fps, fps, narr)
         assert held[0] == pytest.approx(1.055)
 
 
@@ -240,10 +257,10 @@ def test_frame_motion_state_delay_at_or_after_narration_never_starts():
     # 6 秒旁白、delay 7 秒：全程保持初态
     effects = [{"type": "zoom_in", "delay": 7}]
     for k in range(14):  # 12 帧旁白 + 2 帧 hold
-        assert mv.frame_motion_state(effects, k, 2, 12) == (1.0, 1.0, 0.0)
+        assert sg.frame_motion_state(effects, k, 2, 12) == (1.0, 1.0, 0.0)
     # delay 恰等于旁白终点：同样不启动
     for k in range(14):
-        assert mv.frame_motion_state([{"type": "pulse", "delay": 6}], k, 2, 12) == (
+        assert sg.frame_motion_state([{"type": "pulse", "delay": 6}], k, 2, 12) == (
             1.0,
             1.0,
             0.0,
@@ -252,26 +269,26 @@ def test_frame_motion_state_delay_at_or_after_narration_never_starts():
 
 def test_frame_motion_state_single_frame_narration():
     # 零旁白除零保护：narr_frames=1 时不抛错
-    state = mv.frame_motion_state([{"type": "zoom_in", "delay": 0}], 0, 30, 1)
+    state = sg.frame_motion_state([{"type": "zoom_in", "delay": 0}], 0, 30, 1)
     assert state[0] == 1.0
 
 
 def test_delayed_zoom_starts_after_two_seconds_and_finishes_with_narration():
-    effects = mv.resolve_motion({"kind": "rule", "motion": [{"type": "zoom_in", "delay": 2}]})
-    assert mv.motion_vars(effects, 1.5, duration_seconds=6) == (1.0, 1.0, 0.0)
-    assert mv.motion_vars(effects, 4, duration_seconds=6) == pytest.approx((1.048125, 1.0, 0.0))
-    assert mv.motion_vars(effects, 6, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
-    assert mv.motion_vars(effects, 9, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
+    effects = sg.resolve_motion({"kind": "rule", "motion": [{"type": "zoom_in", "delay": 2}]})
+    assert sg.motion_vars(effects, 1.5, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert sg.motion_vars(effects, 4, duration_seconds=6) == pytest.approx((1.048125, 1.0, 0.0))
+    assert sg.motion_vars(effects, 6, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
+    assert sg.motion_vars(effects, 9, duration_seconds=6) == pytest.approx((1.055, 1.0, 0.0))
 
 
 @pytest.mark.parametrize("motion", ["pulse", "zoom_out"])
 def test_delayed_motion_has_no_effect_before_start_or_beyond_narration(motion):
     effects = [{"type": motion, "delay": 2}]
-    assert mv.motion_vars(effects, 0, duration_seconds=6) == (1.0, 1.0, 0.0)
-    assert mv.motion_vars(effects, 1.9, duration_seconds=6) == (1.0, 1.0, 0.0)
-    assert mv.motion_vars(effects, 2, duration_seconds=6)[0] > 1
-    assert mv.motion_vars(effects, 9, duration_seconds=1) == (1.0, 1.0, 0.0)
-    assert mv.motion_vars(effects, 9, duration_seconds=0) == (1.0, 1.0, 0.0)
+    assert sg.motion_vars(effects, 0, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert sg.motion_vars(effects, 1.9, duration_seconds=6) == (1.0, 1.0, 0.0)
+    assert sg.motion_vars(effects, 2, duration_seconds=6)[0] > 1
+    assert sg.motion_vars(effects, 9, duration_seconds=1) == (1.0, 1.0, 0.0)
+    assert sg.motion_vars(effects, 9, duration_seconds=0) == (1.0, 1.0, 0.0)
 
 
 def test_prepare_scene_audio_reports_narration_frames():
@@ -289,16 +306,16 @@ def test_prepare_scene_audio_reports_narration_frames():
 def test_validate_storyboard_rejects_invalid_fps(bad):
     tpl = load_sample()
     tpl["fps"] = bad
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert any("fps" in e for e in errors)
 
 
 def test_validate_storyboard_accepts_default_and_valid_fps():
     tpl = load_sample()
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert not any("fps" in e for e in errors)
     tpl["fps"] = 60
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert not any("fps" in e for e in errors)
 
 
@@ -307,60 +324,142 @@ def test_validate_storyboard_rejects_non_numeric_hold():
     for sc in tpl["scenes"]:
         if sc.get("kind") == "practice":
             sc["hold"] = "五秒"
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert any("有限数字" in e for e in errors)
 
 
-def test_validate_storyboard_rejects_practice_hold_cue_in_narrate():
+@pytest.mark.parametrize(
+    "narrate",
+    [
+        "这句话对吗？我想五秒。",  # 想×秒
+        "接下来三秒，反观你常用的工具。",  # 量词+秒，无「想」前缀
+        "给你三秒钟时间分析背后的机制。",  # 三秒钟
+        "数三秒再看答案。",  # 阿拉伯数字外的量词动词
+        "我想 5 秒。",  # 数字 + 空格
+        "想一想，再看答案。",  # 口播思考动作，句中
+        "想一想吧。",  # 句末但带语气词
+        "想一下。",
+    ],
+)
+def test_validate_storyboard_rejects_practice_think_aloud_in_narrate(narrate):
     tpl = load_sample()
     for sc in tpl["scenes"]:
         if sc.get("kind") == "practice":
-            sc["narrate"] = "这句话对吗？我想五秒。"
-    errors, _ = mv.validate_storyboard(tpl)
-    assert any("禁止报思考时间" in e for e in errors)
+            sc["narrate"] = narrate
+    errors, _ = sg.validate_storyboard(tpl)
+    assert any("禁止口播思考计时" in e for e in errors), narrate
+
+
+@pytest.mark.parametrize(
+    "narrate",
+    [
+        "这句话对还是不对？",
+        "先想想，漫画可以等，但下周要交的钱不能等？",  # 「想想」不是被禁的计时/口播动作
+        "请思考：为什么不直接打七五折？",  # 「思考」不误伤
+    ],
+)
+def test_validate_storyboard_accepts_practice_narrate_without_timing(narrate):
+    tpl = load_sample()
     for sc in tpl["scenes"]:
         if sc.get("kind") == "practice":
-            sc["narrate"] = "这句话对还是不对？"
-    errors, _ = mv.validate_storyboard(tpl)
-    assert not any("禁止报思考时间" in e for e in errors)
+            sc["narrate"] = narrate
+    errors, _ = sg.validate_storyboard(tpl)
+    assert not any("禁止口播思考计时" in e for e in errors), narrate
 
 
 def test_prepare_storyboard_rejects_non_integer_size():
     tpl = load_sample()
     tpl["width"] = "1280px"
     tpl["height"] = 720.5
-    prep = mv.prepare_storyboard(tpl)
+    prep = sg.prepare_storyboard(tpl)
     assert any("width" in e for e in prep["errors"])
     assert any("height" in e for e in prep["errors"])
-    assert prep["W"] == 1280 and prep["H"] == 720
+    assert prep["cfg"].W == 1280 and prep["cfg"].H == 720
 
 
-def test_unverified_preview_requires_clean_report():
+def test_preview_reuse_requires_clean_report_of_this_storyboard():
+    """复用准入：报告须存在、属本次分镜、且判据通过（判据由闸门单一表达）。"""
     tpl = load_sample()
     scenes = tpl["scenes"]
+    fp = "fp00000000"
     with tempfile.TemporaryDirectory(prefix="pv_") as tmp:
-        missing = mv.unverified_preview(tmp, scenes)
+        missing = mv.preview_reuse_errors(tmp, scenes, fp)
         assert missing and "未找到" in missing[0]
 
-        report = [
-            {
-                "i": i,
-                "kind": mv.resolve_kind(sc),
-                "findings": [],
-                "placeholder_errs": [],
-            }
-            for i, sc in enumerate(scenes)
-        ]
-        path = os.path.join(tmp, "overflow.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(report, f)
-        assert mv.unverified_preview(tmp, scenes) == []
+        path = mv.ra.preview_report_path(tmp)
 
-        report[0]["findings"] = [{"sel": ".body", "msg": "溢出"}]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(report, f)
-        bad = mv.unverified_preview(tmp, scenes)
-        assert any("溢出" in e for e in bad)
+        def entry(i, sc, findings=(), ph=()):
+            return sg.preview_report_entry(
+                i, sg.resolve_kind(sc), {"type": "none"}, f"s{i}.png",
+                list(findings), list(ph), fp,
+            )
+
+        def write_report(entries):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(entries, f)
+
+        report = [entry(i, sc) for i, sc in enumerate(scenes)]
+        write_report(report)
+        assert mv.preview_reuse_errors(tmp, scenes, fp) == []
+
+        report[0] = entry(
+            0, scenes[0], findings=[{"sel": ".body", "how": "clip", "msg": "溢出"}]
+        )
+        write_report(report)
+        assert any("溢出" in e for e in mv.preview_reuse_errors(tmp, scenes, fp))
+
+        report = [entry(i, sc) for i, sc in enumerate(scenes)]
+        report[1] = entry(1, scenes[1], ph=["占位符残留"])
+        write_report(report)
+        assert any(
+            "占位符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+        )
+
+        # 页数不符
+        write_report([entry(0, scenes[0])])
+        assert any(
+            "页数" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+        )
+
+        # 别人的报告（分镜指纹不符）：显式 --preview-dir 也不能绕过
+        write_report([entry(i, sc) for i, sc in enumerate(scenes)])
+        assert any(
+            "指纹不符" in e for e in mv.preview_reuse_errors(tmp, scenes, "other")
+        )
+
+        # 条目顺序不符（同一份报告被重排）→ 不可信
+        write_report(list(reversed([entry(i, sc) for i, sc in enumerate(scenes)])))
+        assert any(
+            "顺序不符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+        )
+
+
+def test_make_video_skip_preview_rejected_exits_4_before_tts():
+    """--skip-preview 复用被拒要有专属退出码 4（worker 据此归 PREVIEW 阶段），
+    并停在配音之前。"""
+    if not tc.browser_path():
+        pytest.skip("no Chrome/Edge available")
+    sb = os.path.join(ROOT, "examples", "what_is_harness.json")
+    with tempfile.TemporaryDirectory(prefix="mv_stale_") as tmp:
+        r = subprocess.run(
+            [
+                sys.executable,
+                "scripts/make_video.py",
+                sb,
+                "--skip-preview",
+                "--preview-dir",
+                tmp,  # 空目录：没有 overflow.json
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=dict(os.environ, PYTHONUTF8="1"),
+            timeout=120,
+        )
+    assert r.returncode == 4, r.stdout + r.stderr
+    assert "PREVIEW FAILED" in r.stdout
+    assert "生成配音" not in r.stdout  # 停在配音之前
 
 
 def test_make_video_invalid_fps_does_not_call_tts(monkeypatch):
@@ -381,40 +480,6 @@ def test_make_video_invalid_fps_does_not_call_tts(monkeypatch):
         assert calls == []  # 非法 fps 在 TTS 前被闸门拒绝
     finally:
         os.remove(path)
-
-
-# ---- 06 浏览器发现 ----
-
-
-def test_find_browser_explicit_path():
-    with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as f:
-        path = f.name
-    try:
-        assert mv.find_browser(path) == path
-    finally:
-        os.remove(path)
-
-
-def test_find_browser_explicit_missing_raises():
-    with pytest.raises(FileNotFoundError):
-        mv.find_browser(r"C:\definitely\missing\chrome.exe")
-
-
-def test_find_browser_prefers_available_candidate(monkeypatch):
-    edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-    monkeypatch.setenv("BROWSER_PATH", r"C:\missing\chrome.exe")
-    monkeypatch.setattr(mv.shutil, "which", lambda name: None)
-
-    def fake_isfile(p):
-        return p == edge
-
-    monkeypatch.setattr(mv.os.path, "isfile", fake_isfile)
-    assert mv.find_browser() == edge
-
-
-def test_candidate_paths_includes_env_override(monkeypatch):
-    monkeypatch.setenv("BROWSER_PATH", r"C:\custom\browser.exe")
-    assert r"C:\custom\browser.exe" in mv._candidate_browser_paths()
 
 
 # ---- 07 CLI 参数解析 ----
@@ -455,7 +520,7 @@ def test_build_parser_help_exits_zero(capsys):
 
 
 def test_validate_layouts_requires_think_slot():
-    errs = mv.validate_layouts()
+    errs = sg.validate_layouts()
     assert not any("__THINK__" in e for e in errs)
 
 
@@ -467,7 +532,7 @@ def test_validate_layouts_rejects_inline_baked_style(monkeypatch):
     """
     tmp = tempfile.mkdtemp(prefix="mv_layout_baked_")
     try:
-        for kind, fn in mv.LAYOUT_FILES.items():
+        for kind, fn in sg.LAYOUT_FILES.items():
             with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
                 f.write(_minimal_layout(kind))
         # 给 layout-rule.html 加内联 font-size（最常见的回归场景）
@@ -475,7 +540,7 @@ def test_validate_layouts_rejects_inline_baked_style(monkeypatch):
         with open(path, "a", encoding="utf-8") as f:
             f.write('<div style="font-size:30px">x</div>')
         monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
-        errs = mv.validate_layouts()
+        errs = sg.validate_layouts()
         assert any(
             "HTML 属性 style 烘焙" in e and "layout-rule.html" in e for e in errs
         ), f"expected inline-style rejection, got: {errs}"
@@ -487,7 +552,7 @@ def test_validate_layouts_allows_margin_padding(monkeypatch):
     """纯布局间距（margin/padding）允许内联，不应误伤。"""
     tmp = tempfile.mkdtemp(prefix="mv_layout_margin_")
     try:
-        for kind, fn in mv.LAYOUT_FILES.items():
+        for kind, fn in sg.LAYOUT_FILES.items():
             with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
                 f.write(_minimal_layout(kind))
         # 给 layout-title.html 加内联 margin-top（应通过）
@@ -495,7 +560,7 @@ def test_validate_layouts_allows_margin_padding(monkeypatch):
         with open(path, "a", encoding="utf-8") as f:
             f.write('<div style="margin-top:26px">x</div>')
         monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
-        errs = mv.validate_layouts()
+        errs = sg.validate_layouts()
         assert not any("HTML 属性 style 烘焙" in e for e in errs), errs
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -503,26 +568,26 @@ def test_validate_layouts_allows_margin_padding(monkeypatch):
 
 def test_sample_passes_think_and_escape():
     tpl = load_sample()
-    errors, warns = mv.validate_storyboard(tpl)
+    errors, warns = sg.validate_storyboard(tpl)
     assert not errors
 
 
 @pytest.mark.parametrize("wrong_body", [None, "", "   ", 123])
 def test_side_example_requires_wrong_body(wrong_body):
     tpl = load_sample()
-    sc = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
+    sc = next(sc for sc in tpl["scenes"] if sg.resolve_kind(sc) == "example")
     sc["layout_variant"] = "side"
     if wrong_body is not None:
         sc["wrong_body"] = wrong_body
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert any("wrong_body" in error for error in errors)
 
 
 def test_side_example_accepts_independent_wrong_body():
     tpl = load_sample()
-    sc = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
+    sc = next(sc for sc in tpl["scenes"] if sg.resolve_kind(sc) == "example")
     sc.update(layout_variant="side", wrong_body="He **reading**.")
-    errors, _ = mv.validate_storyboard(tpl)
+    errors, _ = sg.validate_storyboard(tpl)
     assert errors == []
 
 
@@ -611,7 +676,7 @@ def test_build_formula_main_html_display_fallback():
 
 def test_render_html_formula_injects_parts_and_data_id():
     sc = _rule_formula_scene()
-    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    html = sg.render_html(sc, _cfg())
     assert "__FORMULA_MAIN__" not in html
     assert "__PARTS__" not in html
     assert 'data-part-id="num"' in html
@@ -625,7 +690,7 @@ def test_render_html_legacy_formula_variant_uses_body():
         "header": "H", "sub": "S", "body": "E = **mc**", "zh": "步骤说明",
         "narrate": "n",
     }
-    html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
+    html = sg.render_html(sc, _cfg())
     assert "mc" in html or '<span class="hl">' in html
     assert "步骤说明" in html
 
@@ -635,7 +700,7 @@ def test_formula_layout_has_formula_slots():
     assert "__FORMULA_MAIN__" in raw
     assert "__PARTS__" in raw
     assert "__BODY__" not in raw or raw.count("__BODY__") == 0
-    errs = mv.validate_layouts()
+    errs = sg.validate_layouts()
     assert not any("layout-rule-formula.html" in e for e in errs), errs
 
 
@@ -704,8 +769,8 @@ def test_validator_and_renderer_cli_agree_on_gate_failure():
 
 def test_prepare_storyboard_resolves_variant_and_fallback():
     tpl = load_sample()
-    example = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "example")
-    rule = next(sc for sc in tpl["scenes"] if mv.resolve_kind(sc) == "rule")
+    example = next(sc for sc in tpl["scenes"] if sg.resolve_kind(sc) == "example")
+    rule = next(sc for sc in tpl["scenes"] if sg.resolve_kind(sc) == "rule")
     example.update(layout_variant="side", wrong_body="He **reading**.")
     rule["layout_variant"] = "side"
     prep = sg.prepare_storyboard(tpl)
@@ -719,28 +784,26 @@ def test_prepare_storyboard_resolves_variant_and_fallback():
     assert prep2["errors"] == []
     fallback = next(e for e in prep2["scenes"] if e["variant"] == "nope")
     assert fallback["layout_file"] == "layout-rule.html"
-    assert fallback["html"] == sg.render_html(
-        rule, prep2["W"], prep2["H"], prep2["style"], motion_enabled=True
-    )
+    assert fallback["html"] == sg.render_html(rule, prep2["cfg"])
 
 
 def test_validate_layouts_checks_existing_variant_slots(monkeypatch):
     """存在的变体文件按 kind 基础槽位 + 变体专属槽位校验；缺失变体文件不报错。"""
     tmp = tempfile.mkdtemp(prefix="mv_gate_variant_")
     try:
-        for kind, fn in mv.LAYOUT_FILES.items():
+        for kind, fn in sg.LAYOUT_FILES.items():
             with open(os.path.join(tmp, fn), "w", encoding="utf-8") as f:
                 f.write(_minimal_layout(kind))
         # rule side 变体：基于基础槽位但缺 __ZH__ → 应报缺槽
         with open(os.path.join(tmp, "layout-rule-side.html"), "w", encoding="utf-8") as f:
             f.write(_minimal_layout("rule"))
         monkeypatch.setattr(sg, "TEMPLATE_DIR", tmp)
-        errs = mv.validate_layouts()
+        errs = sg.validate_layouts()
         assert any("layout-rule-side.html" in e and "__ZH__" in e for e in errs), errs
         # 变体文件补齐后不再报
         with open(os.path.join(tmp, "layout-rule-side.html"), "w", encoding="utf-8") as f:
             f.write(_minimal_layout("rule") + " __ZH__")
-        errs2 = mv.validate_layouts()
+        errs2 = sg.validate_layouts()
         assert not any("layout-rule-side.html" in e for e in errs2), errs2
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -781,7 +844,7 @@ _CHART_FIXTURE = {
 
 def _rendered_chart_svg(style_name):
     sc = {"kind": "diagram", "header": "H", "body": "B", "chart": _CHART_FIXTURE}
-    html = mv.render_html(sc, 1280, 720, mv.load_style(style_name))
+    html = sg.render_html(sc, _cfg(style_name))
     # 只取图解 SVG 本体：layout CSS 里也注入了同一个 accent，整页断言会假通过
     return html[html.index("<svg") : html.index("</svg>")]
 
@@ -797,8 +860,8 @@ def _point_fill(svg):
 def test_chart_colors_follow_active_skin():
     """图解取色必须走当前皮肤 palette。旧实现按扁平 key 读 style，
     而色值嵌在 palette 下，于是恒落函数里写死的默认色。"""
-    light = sg.style_token_map(mv.load_style("classroom"))
-    dark = sg.style_token_map(mv.load_style("teaching"))
+    light = sg.style_token_map(sg.load_style("classroom"))
+    dark = sg.style_token_map(sg.load_style("teaching"))
     assert light["__ACCENT__"] != dark["__ACCENT__"]  # 前提：两皮确实不同色
 
     svg_light = _rendered_chart_svg("classroom")
@@ -811,7 +874,7 @@ def test_chart_colors_follow_active_skin():
 
 
 def test_chart_color_accepts_literal_hex():
-    colors = sg.style_token_map(mv.load_style("teaching"))
+    colors = sg.style_token_map(sg.load_style("teaching"))
     svg = sg.resolve_chart(
         {
             "preset": "curve",
@@ -841,7 +904,7 @@ def test_chart_highlight_labels_stay_inside_viewbox():
             {"x": 2.5, "y": 50, "label": "中点"},
         ],
     }
-    svg = sg.resolve_chart(chart, sg.style_token_map(mv.load_style("teaching")))
+    svg = sg.resolve_chart(chart, sg.style_token_map(sg.load_style("teaching")))
     boxes = [
         (float(m.group(1)), float(m.group(2)))
         for m in re.finditer(r"<rect x='([-\d.]+)' y='[-\d.]+' width='([-\d.]+)'", svg)
@@ -897,7 +960,7 @@ def test_chart_highlight_labels_do_not_cross_the_curve():
             {"x": 3, "y": 42, "label": "中点"},
         ],
     }
-    svg = sg.resolve_chart(chart, sg.style_token_map(mv.load_style("teaching")))
+    svg = sg.resolve_chart(chart, sg.style_token_map(sg.load_style("teaching")))
     samples = _polyline_samples(svg)
     boxes = _label_boxes(svg)
     assert len(boxes) == 3 and len(samples) > 40, (boxes, len(samples))
@@ -912,7 +975,7 @@ def test_chart_highlight_labels_do_not_cross_the_curve():
 
 def test_chart_fn_presets_and_unknown_falls_back_to_linear():
     """curve.fn 预设表达式推导采样点；未知表达式退回 1 - t。"""
-    colors = sg.style_token_map(mv.load_style("teaching"))
+    colors = sg.style_token_map(sg.load_style("teaching"))
 
     def screen_ys(expr):
         svg = sg.resolve_chart(
@@ -1024,11 +1087,12 @@ def test_browser_formula_vars_drive_computed_style(browser):
     parts = sc["formula"]["parts"]
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
-        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+        page.set_content(sg.render_html(sc, _cfg()))
 
         def snapshot(elapsed):
             sg.apply_motion_css_vars(
-                page, 1.0, 1.0, 0.0, sg.formula_motion_vars(parts, elapsed, 1.0)
+                page, sg.MotionState(1.0, 1.0, 0.0),
+                sg.formula_motion_vars(parts, elapsed, 1.0),
             )
             return {
                 "card": _matrix(page.locator(".formula-card").evaluate(
@@ -1061,7 +1125,7 @@ def test_browser_formula_vars_drive_computed_style(browser):
         assert m["main"][0] > 1.0
         assert m["steps"] == [pytest.approx(0.45)] * 2
         # 交回非公式页语义（formula=None）：一切回到末态，不留残值
-        sg.apply_motion_css_vars(page, 1.0, 1.0, 0.0)
+        sg.apply_motion_css_vars(page, sg.MotionState(1.0, 1.0, 0.0))
         reset = page.locator(".step[data-part-id]").evaluate_all(
             "els => els.map(e => parseFloat(getComputedStyle(e).opacity))"
         )
@@ -1075,7 +1139,7 @@ def test_browser_formula_vars_drive_computed_style(browser):
 
 @pytest.fixture(scope="session")
 def browser():
-    path = mv.find_browser()
+    path = tc.browser_path()
     if not path:
         pytest.skip("no Chrome/Edge available")
     from playwright.sync_api import sync_playwright
@@ -1095,7 +1159,7 @@ def test_browser_text_fidelity(browser):
         "narrate": "n",
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
-    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.set_content(sg.render_html(sc, _cfg()))
     assert page.locator(".body").inner_text().strip() == "区间：0<x<1"
     page.close()
 
@@ -1109,7 +1173,7 @@ def test_browser_no_input_element_from_content(browser):
         "narrate": "n",
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
-    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.set_content(sg.render_html(sc, _cfg()))
     assert page.locator("input").count() == 0
     assert page.locator("span.hl").count() == 1
     page.close()
@@ -1125,11 +1189,11 @@ def test_browser_overflow_detects_hl_scale(browser):
         "narrate": "n",
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
-    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.set_content(sg.render_html(sc, _cfg()))
     # 放大高亮词（模拟动效对 .hl 的独立缩放），.stage/.body 布局不变
-    mv.apply_motion_css_vars(page, 1.0, 3.0, 0.0)
-    findings = mv.preview_overflow(page, 1280, 720, kind="rule")
-    sels = [sel for sel, _ in findings]
+    sg.apply_motion_css_vars(page, sg.MotionState(1.0, 3.0, 0.0))
+    findings = sg.preview_overflow(page, 1280, 720, kind="rule")
+    sels = [f["sel"] for f in findings]
     assert ".hl" in sels
     assert ".body" not in sels  # 容器未溢出，只有被放大的高亮词被报告
     page.close()
@@ -1148,28 +1212,32 @@ def test_browser_overflow_detects_delayed_zoom_end_state(browser):
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
-        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
-        motion = mv.resolve_motion(sc, True)
+        page.set_content(sg.render_html(sc, _cfg()))
+        motion = sg.resolve_motion(sc, True)
         end_state = max(
-            mv._motion_probe_states(motion),
-            key=lambda s: mv.motion_vars(motion, *s)[0],
+            sg._motion_probe_states(motion),
+            key=lambda s: sg.motion_vars(motion, *s)[0],
         )
-        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, 0.0, 1.0))
+        sg.apply_motion_css_vars(page, sg.motion_vars(motion, 0.0, 1.0))
         right_initial = page.evaluate(
             "document.querySelector('.body').getBoundingClientRect().right"
         )
-        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, *end_state))
+        sg.apply_motion_css_vars(page, sg.motion_vars(motion, *end_state))
         right_end = page.evaluate(
             "document.querySelector('.body').getBoundingClientRect().right"
         )
         assert right_end > right_initial
         width = (right_initial + right_end) / 2  # 初态不越界、末态越界的探测宽度
 
-        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, 0.0, 1.0))
-        sels_initial = [sel for sel, _ in mv.preview_overflow(page, width, 720, kind="rule")]
+        sg.apply_motion_css_vars(page, sg.motion_vars(motion, 0.0, 1.0))
+        sels_initial = [
+            f["sel"] for f in sg.preview_overflow(page, width, 720, kind="rule")
+        ]
         assert ".body" not in sels_initial
-        mv.apply_motion_css_vars(page, *mv.motion_vars(motion, *end_state))
-        sels_end = [sel for sel, _ in mv.preview_overflow(page, width, 720, kind="rule")]
+        sg.apply_motion_css_vars(page, sg.motion_vars(motion, *end_state))
+        sels_end = [
+            f["sel"] for f in sg.preview_overflow(page, width, 720, kind="rule")
+        ]
         assert ".body" in sels_end
     finally:
         page.close()
@@ -1179,7 +1247,7 @@ def test_browser_overflow_reports_clipped_text(browser):
     # 盒子仍在视口内，但槽自身 overflow:hidden 把字裁掉，也要报
     sc = {"kind": "rule", "header": "h", "sub": "s", "body": "完整的一句话", "narrate": "n"}
     page = browser.new_page(viewport={"width": 1280, "height": 720})
-    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.set_content(sg.render_html(sc, _cfg()))
     page.evaluate(
         """() => {
           const b = document.querySelector('.body');
@@ -1190,8 +1258,8 @@ def test_browser_overflow_reports_clipped_text(browser):
           b.textContent = '这是一段明显超出卡片高度和宽度的说明文字';
         }"""
     )
-    findings = mv.preview_overflow(page, 1280, 720, kind="rule")
-    assert any(sel == ".body" and "裁切" in msg for sel, msg in findings)
+    findings = sg.preview_overflow(page, 1280, 720, kind="rule")
+    assert any(f["sel"] == ".body" and "裁切" in f["msg"] for f in findings)
     page.close()
 
 
@@ -1199,12 +1267,12 @@ def test_browser_overflow_reports_top_bound(browser):
     # 四侧边界：顶部裁切也要被报告
     sc = {"kind": "rule", "header": "h", "sub": "s", "body": "**B**", "narrate": "n"}
     page = browser.new_page(viewport={"width": 1280, "height": 720})
-    page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+    page.set_content(sg.render_html(sc, _cfg()))
     page.evaluate(
         "() => { const t = document.querySelector('.title'); t.style.position = 'absolute'; t.style.top = '-100px'; }"
     )
-    findings = mv.preview_overflow(page, 1280, 720, kind="rule")
-    assert any(sel == ".title" for sel, _ in findings)
+    findings = sg.preview_overflow(page, 1280, 720, kind="rule")
+    assert any(f["sel"] == ".title" for f in findings)
     page.close()
 
 
@@ -1219,8 +1287,8 @@ def test_browser_side_example_has_distinct_escaped_columns(browser):
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
-        html = mv.render_html(sc, 1280, 720, mv.load_style("teaching"))
-        assert mv.validate_rendered_html(html, 0) == []
+        html = sg.render_html(sc, _cfg())
+        assert sg.validate_rendered_html(html, 0) == []
         page.set_content(html)
         assert page.locator(".col-correct .col-text").inner_text() == "He is reading."
         assert (
@@ -1254,7 +1322,7 @@ def test_browser_static_diagram_first_frame_is_complete(
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
         page.set_content(
-            mv.render_html(sc, 1280, 720, mv.load_style("teaching"), motion_enabled)
+            sg.render_html(sc, _cfg(motion=motion_enabled))
         )
         page.screenshot(type="png")
         states = page.locator(".stagger-item,.glow-point").evaluate_all(
@@ -1279,10 +1347,18 @@ def test_browser_animated_diagram_still_has_animations(browser):
     }
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     try:
-        page.set_content(mv.render_html(sc, 1280, 720, mv.load_style("teaching")))
+        page.set_content(sg.render_html(sc, _cfg()))
         assert page.evaluate("document.getAnimations().length") > 0
     finally:
         page.close()
+
+
+def _write_preview_storyboard(tmp, name, scene):
+    """run_preview 会读分镜文件算指纹，故给它一个真实存在的分镜（生产路径必有）。"""
+    path = os.path.join(tmp, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"scenes": [scene]}, f, ensure_ascii=False)
+    return path
 
 
 def test_preview_rejects_clipped_formula():
@@ -1291,10 +1367,11 @@ def test_preview_rejects_clipped_formula():
         "body": "<br>".join(["A = B + C"] * 24), "narrate": "Formula",
     }
     # run_preview owns its Playwright loop; keep it separate from the browser fixture.
-    with tempfile.TemporaryDirectory(prefix="mv_formula_overflow_") as preview_dir, ThreadPoolExecutor(max_workers=1) as executor:
+    with tempfile.TemporaryDirectory(prefix="mv_formula_overflow_") as tmp, ThreadPoolExecutor(max_workers=1) as executor:
+        sb = _write_preview_storyboard(tmp, "formula.json", sc)
         result = executor.submit(
-            mv.run_preview, "formula.json", [sc], mv.load_style("teaching"), 1280, 720,
-            False, mv.find_browser(), preview_dir=preview_dir,
+            mv.run_preview, sb, _cfg(motion=False), [sc],
+            tc.browser_path(), preview_dir=os.path.join(tmp, "preview"),
         ).result()
     assert result == 1
 
@@ -1311,9 +1388,220 @@ def test_preview_rejects_clipped_variant_content(kind, variant, field):
         "body": "A", "wrong_body": "B", "zh": "Detail", "narrate": "Compare",
         field: "<br>".join(["A = B + C"] * 24),
     }
-    with tempfile.TemporaryDirectory(prefix="mv_variant_overflow_") as preview_dir, ThreadPoolExecutor(max_workers=1) as executor:
+    with tempfile.TemporaryDirectory(prefix="mv_variant_overflow_") as tmp, ThreadPoolExecutor(max_workers=1) as executor:
+        sb = _write_preview_storyboard(tmp, "variant.json", sc)
         result = executor.submit(
-            mv.run_preview, "variant.json", [sc], mv.load_style("teaching"), 1280, 720,
-            False, mv.find_browser(), preview_dir=preview_dir,
+            mv.run_preview, sb, _cfg(motion=False), [sc],
+            tc.browser_path(), preview_dir=os.path.join(tmp, "preview"),
         ).result()
     assert result == 1
+
+
+# ---- 溢出选择器表与判据（S3/S4 清理）----
+
+
+def test_overflow_selectors_unique_and_clip_exempt():
+    """同一 DOM 元素不能在表里出现两次；装饰性容器不计入裁切。"""
+    rule = sg._OVERFLOW_SELECTORS_BY_KIND["rule"]
+    assert len(rule) == len(set(rule))
+    # .step-text 与 .part-text 是同一个元素（build_formula_parts_html），只留一个
+    assert ".step-text" in rule and ".part-text" not in rule
+    diagram = sg._OVERFLOW_SELECTORS_BY_KIND["diagram"]
+    # 视口越界仍要报，但圆角裁切不算文字丢失
+    assert ".chart-container" in diagram
+    assert ".chart-container" in sg._CLIP_EXEMPT_SELECTORS
+    assert not (sg._CLIP_EXEMPT_SELECTORS & set(rule))
+
+
+def test_finding_key_separates_viewport_and_clip():
+    """同一槽同一文本的「越界」与「裁切」是两条诊断，去重键必须区分；
+    坐标不入键，否则动效各状态会重复上报。"""
+    v = {"sel": ".body", "how": "viewport", "txt": "同一段字", "msg": "…"}
+    c = {"sel": ".body", "how": "clip", "txt": "同一段字", "msg": "…"}
+    assert mv._finding_key(v) != mv._finding_key(c)
+    # 坐标（或整段文案）变化不改变键：动效各状态坐标会变
+    v2 = {"sel": ".body", "how": "viewport", "txt": "同一段字",
+          "msg": "完全换一段文案 left=99 top=9"}
+    assert mv._finding_key(v) == mv._finding_key(v2)
+    # 元素文本变化 → 不同键
+    assert mv._finding_key(dict(v, txt="别的字")) != mv._finding_key(v)
+
+
+def test_finding_key_is_built_from_producer_fields(browser):
+    """去重键取自 preview_overflow 的字段，不解析它的人读消息。
+
+    先前的测试手写诊断字符串，等于验证了一个自己臆造的格式；这里喂真实产出，
+    并断言改写文案不改变键。
+    """
+    sc = {"kind": "rule", "header": "h", "sub": "s", "body": "完整的一句话", "narrate": "n"}
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(sg.render_html(sc, _cfg()))
+        page.evaluate(
+            """() => {
+              const b = document.querySelector('.body');
+              b.style.overflow = 'hidden';
+              b.style.height = '20px';
+              b.textContent = '这是一段明显超出卡片高度的说明文字';
+            }"""
+        )
+        findings = sg.preview_overflow(page, 1280, 720, kind="rule")
+    finally:
+        page.close()
+    assert findings, "应至少报一条裁切"
+    f = findings[0]
+    assert "txt" in f and f["txt"], "生产方必须给出 txt 字段"
+    key = mv._finding_key(f)
+    assert mv._finding_key(dict(f, msg="换一段诊断文案")) == key
+    assert mv._finding_key(dict(f, txt="另一个元素文本")) != key
+
+
+def test_browser_clipped_formula_part_reported_once(browser):
+    """公式部件被裁切只报一条（.step-text/.part-text 不再重复命中）。"""
+    sc = {
+        "kind": "rule", "layout_variant": "formula", "header": "h", "narrate": "n",
+        "formula": {"display": "A", "parts": [{"label": "1", "text": "部件说明"}]},
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(sg.render_html(sc, _cfg()))
+        assert page.evaluate("document.querySelectorAll('.step-text').length") == 1
+        page.evaluate(
+            """() => {
+              const el = document.querySelector('.step-text');
+              el.style.overflow = 'hidden';
+              el.style.height = '12px';
+              el.textContent = '明显超出部件高度的说明文字，用来触发裁切检测';
+            }"""
+        )
+        findings = sg.preview_overflow(page, 1280, 720, kind="rule")
+    finally:
+        page.close()
+    hits = [f for f in findings if f["sel"] in (".step-text", ".part-text")]
+    assert len(hits) == 1, hits
+    assert hits[0]["how"] == "clip"
+
+
+def test_browser_chart_container_clip_exempt_but_viewport_reported(browser):
+    """.chart-container 的圆角裁切不报；越出视口仍报（豁免只针对裁切）。"""
+    sc = {
+        "kind": "diagram", "header": "D", "body": "B",
+        "chart": {"preset": "curve", "highlights": [{"x": 2, "y": 40, "label": "B"}]},
+    }
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(sg.render_html(sc, _cfg()))
+        page.evaluate(
+            """() => {
+              const el = document.querySelector('.chart-container');
+              el.style.overflow = 'hidden';
+              el.style.height = '10px';
+            }"""
+        )
+        clipped = [
+            f for f in sg.preview_overflow(page, 1280, 720, kind="diagram")
+            if f["sel"] == ".chart-container"
+        ]
+        page.evaluate(
+            """() => {
+              const el = document.querySelector('.chart-container');
+              el.style.height = '';
+              el.style.position = 'fixed';
+              el.style.left = '-400px';
+            }"""
+        )
+        moved = [
+            f for f in sg.preview_overflow(page, 1280, 720, kind="diagram")
+            if f["sel"] == ".chart-container"
+        ]
+    finally:
+        page.close()
+    assert clipped == []
+    assert [f["how"] for f in moved] == ["viewport"]
+
+
+# ---- 闸门解析器协议（S4-9/10、S5-17/18）----
+
+
+def _practice_scene(tpl):
+    return next(sc for sc in tpl["scenes"] if sc.get("kind") == "practice")
+
+
+@pytest.mark.parametrize("bad", [None, "", "五秒", -1, float("nan"), float("inf")])
+def test_gate_rejects_explicit_null_and_negative_hold(bad):
+    """显式 null / 空串 / 负数与「缺省」不同待遇：同一类输入不能两种待遇。"""
+    tpl = load_sample()
+    _practice_scene(tpl)["hold"] = bad
+    errors, _ = sg.validate_storyboard(tpl)
+    assert any("hold" in e for e in errors), bad
+
+
+def test_gate_accepts_numeric_string_hold():
+    tpl = load_sample()
+    _practice_scene(tpl)["hold"] = "5"
+    errors, _ = sg.validate_storyboard(tpl)
+    assert not any("hold" in e for e in errors)
+
+
+def test_gate_reports_hold_error_once():
+    """非法 hold 只报一条：不再叠一条下限错误（相邻两个 practice 分支已合并）。"""
+    tpl = load_sample()
+    _practice_scene(tpl)["hold"] = "五秒"
+    errors, _ = sg.validate_storyboard(tpl)
+    assert len([e for e in errors if "hold" in e]) == 1
+
+
+def test_gate_hold_floor_message_matches_docs():
+    """报错文案与 docs/teaching-method.md 的 `hold>=5.0` 字面一致。"""
+    tpl = load_sample()
+    _practice_scene(tpl)["hold"] = 1.0
+    errors, _ = sg.validate_storyboard(tpl)
+    assert any("hold>=5.0" in e for e in errors)
+
+
+def test_gate_fps_uses_shared_positive_int_rule():
+    """fps 与宽高共用同一判据与文案（不再各写一套）。"""
+    tpl = load_sample()
+    tpl["fps"] = "30"
+    errors, _ = sg.validate_storyboard(tpl)
+    assert "fps 须为正整数（当前 '30'）；缺省 30" in errors
+
+
+def test_gate_rejects_explicit_null_size():
+    tpl = load_sample()
+    tpl["width"] = None
+    prep = sg.prepare_storyboard(tpl)
+    assert any("width" in e for e in prep["errors"])
+    assert prep["cfg"].W == 1280
+
+
+# ---- 皮肤名解析：三个入口共用一条规则 ----
+
+
+def test_resolve_style_name_precedence():
+    assert sg.resolve_style_name({"style": "classroom"}, "explainer") == "explainer"
+    assert sg.resolve_style_name({"style": "classroom"}) == "classroom"
+    assert sg.resolve_style_name({}) == "teaching"
+    assert sg.resolve_style_name(None) == "teaching"
+
+
+def test_style_name_rule_is_written_once():
+    """两个 CLI 必须委托 resolve_style_name，不得自己再拼一遍。
+
+    各自拼一遍时，一旦分歧就表现为验收报「本次运行没有 manifest」——
+    看起来像没渲染，其实是默认皮肤不一致。
+    """
+    for rel in ("render_worker.py", "worker_verify.py"):
+        src = open(os.path.join(ROOT, "scripts", rel), encoding="utf-8").read()
+        assert 'get("style"' not in src, f"{rel} 又自己拼了一遍皮肤名规则"
+        assert "resolve_style_name" in src, f"{rel} 未委托 resolve_style_name"
+
+
+def test_style_name_agrees_with_prepare_storyboard():
+    """CLI 侧与 prepare_storyboard 侧对同一分镜得到同一个皮肤名。"""
+    tpl = load_sample()
+    tpl["style"] = "classroom"
+    prep = sg.prepare_storyboard(tpl)
+    assert prep["cfg"].style_name == "classroom"
+    assert sg.resolve_style_name(tpl) == prep["cfg"].style_name
+    assert sg.resolve_style_name(tpl, "explainer") == "explainer"

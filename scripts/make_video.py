@@ -9,62 +9,58 @@ make_video.py — 教学微课渲染器（Skill 阶段 2）
 闸门规则、布局选择与页面准备集中在 storyboard_gate.py（唯一规则源）；
 本模块持有运行环境与媒体管线：浏览器发现、TTS、音频加工、编码、预览探测执行。
 预览去重：worker 先用 --preview 单独预验，再以 --skip-preview 渲成片，一次运行
-只截一次图。跳过前必须读到同一目录里通过的 overflow.json（页数一致、无溢出、
-无占位符错误）；缺失或未通过则停，不配音。预览目录由 run_key（分镜字节 +
-style + motion 开关）决定。
+只截一次图。跳过前必须读到同一目录里通过的 overflow.json（页数/顺序/kind/分镜
+指纹一致，且无溢出、无占位符错误）；缺失或未通过则停，不配音（exit 4）。
+「什么算通过」由 storyboard_gate.preview_report_errors 单一定义，本模块与复用准入
+共用同一条判据。预览目录由 run_key（分镜字节 + style + motion 开关 +
+templates/ 内容）决定。
 """
 
 import argparse
 import base64
-import hashlib
 import io
 import json
 import math
 import os
-import re
-import shutil
 import subprocess
 import sys
 import urllib.request
 
+import audio_cache as ac  # noqa: E402  原始旁白缓存契约（纯 stdlib，与 verify 共用）
 import run_artifacts as ra  # noqa: E402  单次渲染产物归属（run_key/manifest）
-from storyboard_gate import (  # noqa: F401  兼容 re-export：测试与 worker 消费 mv.*
-    LAYOUT_FILES,
+import toolchain as tc  # noqa: E402  本机工具定位（纯 stdlib，惰性解析 ffmpeg）
+import worker_result as wr  # noqa: E402  子进程退出码契约（与 worker 共用）
+# 只导入本模块真正要用的闸门名字。这里曾经整块再导出 24 个名字供测试消费 mv.*——
+# 同一个实现于是有两个 interface，还掩盖了哪条规则归哪个模块。
+from storyboard_gate import (
     _motion_display_name,
     _motion_probe_states,
     apply_motion_css_vars,
     frame_motion_state,
     formula_motion_vars,
     formula_parts_for_motion,
-    highlight_body,
     load_env,
-    load_style,
     motion_vars,
+    parse_seconds,
     prepare_storyboard,
     preview_overflow,
-    parse_seconds,
+    preview_report_entry,
+    preview_report_errors,
     render_html,
     resolve_kind,
     resolve_motion,
     resolve_motion_enabled,
     resolve_voice,
-    validate_layouts,
     validate_rendered_html,
-    validate_storyboard,
 )
 
 # 集中配置初始化：可选加载 ROOT/.env（显式环境变量优先），先于 MI 配置读取
 load_env()
 
-import imageio_ffmpeg  # noqa: E402
 import numpy as np  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-
-# 音频缓存解码版本。错误解码路径生成的旧 raw 无此版本号，缓存不命中。
-CACHE_VERSION = "2"
 
 MI_URL = os.environ.get(
     "MIMO_API_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
@@ -211,48 +207,6 @@ def prepare_scene_audio(raw_pcm, hold, fps, fade_sec=FADE_SEC, tail_pad=TAIL_PAD
     return pcm, n_frames, n_frames / float(fps), narration_frames
 
 
-def _candidate_browser_paths():
-    """按优先级列出候选浏览器可执行路径（含显式 BROWSER_PATH/CHROME_PATH）。"""
-    cands = []
-    env = os.environ.get("BROWSER_PATH") or os.environ.get("CHROME_PATH")
-    if env:
-        cands.append(env)
-    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    local = os.environ.get("LOCALAPPDATA", "")
-    cands += [
-        os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
-        os.path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
-        os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
-        os.path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe"),
-    ]
-    if local:
-        cands += [
-            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
-            os.path.join(local, "Microsoft", "Edge", "Application", "msedge.exe"),
-        ]
-    for name in ("chrome", "google-chrome", "msedge", "chromium", "chromium-browser"):
-        w = shutil.which(name)
-        if w:
-            cands.append(w)
-    return [c for c in cands if c]
-
-
-def find_browser(explicit=None):
-    """解析浏览器路径：显式参数 > BROWSER_PATH/CHROME_PATH > 常见安装/PATH。
-
-    返回可用路径，或 None（候选都不存在时）。preview 与成片共用同一结果。
-    """
-    if explicit:
-        if os.path.isfile(explicit):
-            return explicit
-        raise FileNotFoundError(f"指定浏览器不存在: {explicit}")
-    for p in _candidate_browser_paths():
-        if os.path.isfile(p):
-            return p
-    return None
-
-
 def build_parser():
     p = argparse.ArgumentParser(
         prog="make_video.py",
@@ -283,7 +237,7 @@ def build_parser():
     pv.add_argument(
         "--skip-preview",
         action="store_true",
-        help="跳过重新截图：仅当本目录 overflow.json 已通过（页数一致且无溢出）",
+        help="跳过重新截图：仅当本目录 overflow.json 属本次分镜且已通过（页数/顺序/kind 一致、无溢出/占位符错误）",
     )
     p.add_argument(
         "--browser",
@@ -318,17 +272,18 @@ def main():
         print("VALIDATION FAILED:")
         for e in prep["errors"]:
             print(" -", e)
-        sys.exit(2)
+        sys.exit(wr.MV_EXIT_VALIDATION)
     # fps 已在闸门校验为正整数；此处才转换，避免非法值在闸门前抛无上下文异常
-    FPS = int(prep["fps"])
-    style, W, H = prep["style"], prep["W"], prep["H"]
+    cfg = prep["cfg"]
+    FPS = int(cfg.fps)
+    style, W, H = cfg.style, cfg.W, cfg.H
     scenes = tpl["scenes"]
     # 单次运行产物归属（#22）：run 目录拥有本次 preview + 加工音轨 + manifest；
     # 可共享的 raw 旁白仍在 _build/<slug>/（旁白+音色指纹，style 不参与）
     slug = os.path.splitext(os.path.basename(tpl_path))[0]
-    rdir = ra.locate_run(ROOT, tpl_path, prep["style_name"], motion_enabled)
+    rdir = ra.locate_run(ROOT, tpl_path, cfg.style_name, motion_enabled)
     print(
-        f"   style={prep['style_name']} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
+        f"   style={cfg.style_name} ({style.get('style_id')}), motion={'on' if motion_enabled else 'off'}, scenes={len(scenes)} OK"
     )
     print(f"   run={rdir}")
     preview_out = args.preview_dir or ra.preview_dir(rdir)
@@ -338,35 +293,35 @@ def main():
 
     # 浏览器解析：preview 与成片共用同一结果；候选全缺时在 TTS 前给出可执行提示
     try:
-        browser = find_browser(args.browser)
+        browser = tc.browser_path(args.browser)
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
-        sys.exit(3)
+        sys.exit(wr.MV_EXIT_BROWSER)
     if not browser:
         print(
             "ERROR: 未找到可用浏览器（Chrome/Edge）。请安装 Chrome 或 Edge；"
             "或用环境变量 BROWSER_PATH（或 CHROME_PATH）指定浏览器可执行文件路径，"
             "或用 --browser <路径> 显式指定。"
         )
-        sys.exit(3)
+        sys.exit(wr.MV_EXIT_BROWSER)
 
     # 预览闸门：缩略图 + 溢出；--preview 到此结束。
     # 去重：完整 worker 的 Step 2 已用 --preview 验过同 run_key 的产物，
     # 成片阶段传 --skip-preview 复用。缺报告、页数不符或仍有溢出则停，不配音。
     if args.skip_preview:
-        preview_errs = unverified_preview(preview_out, scenes)
+        preview_errs = preview_reuse_errors(
+            preview_out, scenes, ra.storyboard_fingerprint(tpl_path)
+        )
         if preview_errs:
             print("PREVIEW FAILED:")
             for e in preview_errs:
                 print(" -", e)
             print("预览未通过，已跳过配音/成片。先跑 --preview，或去掉 --skip-preview。")
-            sys.exit(1)
+            sys.exit(wr.MV_EXIT_PREVIEW_STALE)
         print(f"1/4 预览截图与溢出... 跳过（复用已有预览）→ {preview_out}")
     else:
         print("1/4 预览截图与溢出...")
-        preview_rc = run_preview(
-            tpl_path, scenes, style, W, H, motion_enabled, browser, preview_out
-        )
+        preview_rc = run_preview(tpl_path, cfg, scenes, browser, preview_out)
         if args.preview:
             sys.exit(preview_rc)
         if preview_rc != 0:
@@ -382,13 +337,13 @@ def main():
     scene_meta = []
     for i, sc in enumerate(scenes):
         sc_voice = resolve_voice(sc, tpl)
-        raw_path, _ = _audio_paths(cache_dir, i, sc["narrate"], sc_voice)
-        fp = _audio_fingerprint(sc["narrate"], sc_voice)
+        raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice)
+        fp = ac.fingerprint(sc["narrate"], sc_voice)
         wav_path = ra.scene_wav(rdir, i, fp)
-        hold = parse_seconds(sc.get("hold", 0.0))
-        if hold is None:
-            raise RuntimeError(f"scene {i} hold 不是有限数字（闸门应已拒绝）")
-        if args.reuse_audio and _cache_hit(raw_path, sc_voice, sc["narrate"]):
+        hold, hold_err = parse_seconds(sc.get("hold", 0.0))
+        if hold_err:
+            raise RuntimeError(f"scene {i} {hold_err}（闸门应已拒绝）")
+        if args.reuse_audio and ac.is_hit(raw_path, sc_voice, sc["narrate"]):
             raw_pcm, rate = read_wav_pcm(raw_path)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(f"{raw_path} 采样率 {rate} != {SAMPLE_RATE}")
@@ -411,7 +366,7 @@ def main():
                     f"scene {i} TTS 位深 {sampwidth * 8}bit != 16bit（仅支持 16bit）"
                 )
             write_wav_pcm(raw_path, raw_pcm, SAMPLE_RATE)
-            _write_cache_meta(raw_path, sc_voice, sc["narrate"], SAMPLE_RATE)
+            ac.write_meta(raw_path, sc_voice, sc["narrate"], SAMPLE_RATE)
             src = "tts"
         pcm, n_frames, dur, narr_frames = prepare_scene_audio(raw_pcm, hold, FPS)
         write_wav_pcm(wav_path, pcm, SAMPLE_RATE)
@@ -447,7 +402,7 @@ def main():
     n = len(wavs)
     # 音轨已在 prepare_scene_audio 完成淡化+hold 填充；此处只 aresample + concat，不再二次 afade
     cmd = [
-        FFMPEG,
+        tc.ffmpeg_path(),
         "-y",
         "-loglevel",
         "error",
@@ -510,13 +465,13 @@ def main():
         page = b.new_page(viewport={"width": W, "height": H})
         for i, sc in enumerate(scenes):
             html = render_html(
-                sc, W, H, style, motion_enabled=motion_enabled and frame_counts[i] > 1
+                sc, cfg._replace(motion_enabled=motion_enabled and frame_counts[i] > 1)
             )
             left = validate_rendered_html(html, i)
             if left:
                 proc.kill()
                 print("VALIDATION FAILED mid-render:", left)
-                sys.exit(2)
+                sys.exit(wr.MV_EXIT_VALIDATION)
             page.set_content(html)
             motion = resolve_motion(sc, motion_enabled)
             fparts = formula_parts_for_motion(sc)
@@ -527,7 +482,7 @@ def main():
                 fvars = (
                     formula_motion_vars(fparts, 1.0, 1.0) if fparts is not None else None
                 )
-                apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0), fvars)
+                apply_motion_css_vars(page, motion_vars(motion, 0.0, 1.0), fvars)
                 shot = page.screenshot(type="png")
                 for _ in range(n_frames):
                     ff_stdin.write(shot)
@@ -545,7 +500,7 @@ def main():
                     )
                     apply_motion_css_vars(
                         page,
-                        *frame_motion_state(motion, k, FPS, narr_frames),
+                        frame_motion_state(motion, k, FPS, narr_frames),
                         fvars,
                     )
                     ff_stdin.write(page.screenshot(type="png"))
@@ -557,10 +512,10 @@ def main():
     print(f"   {gi} 帧 pipe 完成, rc={rc}")
     if rc != 0:
         print("FFMPEG ERR:", err[-2000:])
-        sys.exit(1)
+        sys.exit(wr.MV_EXIT_FAIL)
 
     print("4/4 时长核对...")
-    actual_dur = _ffprobe_duration(out)
+    actual_dur = tc.media_duration(out)
     if actual_dur is not None and abs(actual_dur - expected_dur) > 0.15:
         print(
             f"   WARN: 时长偏差: 实测 {actual_dur:.2f}s vs Σ {expected_dur:.2f}s"
@@ -575,93 +530,34 @@ def main():
     print(f"   TTS 本次生成 {tts_generated} / 复用 {tts_reused}")
     ra.write_manifest(
         rdir,
-        {
-            "schema": ra.MANIFEST_SCHEMA,
-            "style_name": prep["style_name"],
-            "motion_enabled": motion_enabled,
-            "fps": FPS,
-            "W": W,
-            "H": H,
-            "storyboard": os.path.abspath(tpl_path),
-            "mp4": os.path.abspath(out),
-            "expected_duration": expected_dur,
-            "tts_generated": tts_generated,
-            "tts_reused": tts_reused,
-            "reuse_mode": "reuse" if args.reuse_audio else "regenerate",
-            "scenes": scene_meta,
-        },
+        ra.make_manifest(
+            style_name=cfg.style_name,
+            motion_enabled=motion_enabled,
+            fps=FPS,
+            W=W,
+            H=H,
+            storyboard=os.path.abspath(tpl_path),
+            mp4=os.path.abspath(out),
+            expected_duration=expected_dur,
+            scenes=scene_meta,
+            tts_generated=tts_generated,
+            tts_reused=tts_reused,
+            reuse_mode="reuse" if args.reuse_audio else "regenerate",
+        ),
     )
     print(f"DONE -> {out}  ({os.path.getsize(out)} bytes)")
 
 
-# ---- 音频缓存：按 lesson 目录隔离；旁白+音色指纹；style 不参与（换皮不重 TTS）----
+# ---- 音频缓存与工具定位：契约分别在 audio_cache / toolchain（纯 stdlib）----
 
 
-def _audio_fingerprint(narrate, voice):
-    """8 字符内容指纹。voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
-    return hashlib.sha256(f"{voice}|{narrate}".encode()).hexdigest()[:8]
-
-
-def _audio_paths(cache_dir, i, narrate, voice):
-    fp = _audio_fingerprint(narrate, voice)
-    raw = os.path.join(cache_dir, f"s{i}_{fp}_raw.wav")
-    wav = os.path.join(cache_dir, f"s{i}_{fp}.wav")
-    return raw, wav
-
-
-def _write_cache_meta(raw_path, voice, narrate, rate):
-    meta = {
-        "ver": CACHE_VERSION,
-        "voice": voice,
-        "narrate": narrate,
-        "rate": rate,
-        "fp": _audio_fingerprint(narrate, voice),
-    }
-    ra.atomic_write_bytes(
-        raw_path + ".meta.json",
-        json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"),
-    )
-
-
-def _cache_hit(raw_path, voice, narrate):
-    """raw 存在 + sidecar meta 与旁白/音色一致且为当前解码版本才命中。"""
-    if not os.path.isfile(raw_path):
-        return False
-    meta_path = raw_path + ".meta.json"
-    if not os.path.isfile(meta_path):
-        return False
-    try:
-        with open(meta_path, encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        return False
-    return (
-        meta.get("ver") == CACHE_VERSION
-        and meta.get("voice") == voice
-        and meta.get("narrate") == narrate
-        and meta.get("fp") == _audio_fingerprint(narrate, voice)
-    )
-
-
-def _ffprobe_duration(path):
-    """通过 ffmpeg -i 解析 stderr 的 Duration 字段，返回秒；失败返回 None。"""
-    try:
-        r = subprocess.run([FFMPEG, "-i", path], capture_output=True, timeout=15)
-        s = r.stderr.decode(errors="replace")
-        m = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}\.\d+)", s)
-        if m:
-            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
-    except Exception:
-        pass
-    return None
-
-
-def unverified_preview(preview_dir, scenes):
+def preview_reuse_errors(preview_dir, scenes, storyboard_fp):
     """--skip-preview 的准入检查。返回错误列表；空列表表示可以复用、不必重截。
 
-    报告须存在、可解析、页数与分镜一致，且每页无溢出、无占位符错误、kind 相符。
+    本函数只管「报告在不在、读不读得动」；「什么算通过、报告是否属于本次分镜」
+    由 storyboard_gate.preview_report_errors 这一条判据决定（唯一规则源）。
     """
-    path = os.path.join(preview_dir, "overflow.json")
+    path = ra.preview_report_path(preview_dir)
     if not os.path.isfile(path):
         return [f"未找到已通过的预览报告: {path}"]
     try:
@@ -669,31 +565,34 @@ def unverified_preview(preview_dir, scenes):
             report = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         return [f"预览报告无法读取: {path} ({e})"]
-    if not isinstance(report, list) or len(report) != len(scenes):
-        n = len(report) if isinstance(report, list) else "非列表"
-        return [f"预览报告页数 {n} 与分镜 {len(scenes)} 不符: {path}"]
-    errs = []
-    for i, sc in enumerate(scenes):
-        item = report[i]
-        if not isinstance(item, dict):
-            errs.append(f"scene {i} 预览记录不是对象")
-            continue
-        kind = resolve_kind(sc)
-        if item.get("kind") != kind:
-            errs.append(
-                f"scene {i} 预览 kind={item.get('kind')!r} 与分镜 {kind} 不符"
-            )
-        if item.get("findings"):
-            errs.append(f"scene {i} 预览仍有溢出")
-        if item.get("placeholder_errs"):
-            errs.append(f"scene {i} 预览仍有占位符错误")
+    gate_errs, overflow_errs, binding_errs = preview_report_errors(
+        report, scenes, storyboard_fp
+    )
+    errs = [f"{e}（{path}）" for e in binding_errs]
+    if gate_errs:
+        errs.append(f"预览仍有占位符错误（{len(gate_errs)} 条）：{gate_errs[0]}")
+    if overflow_errs:
+        errs.append(f"预览仍有溢出/裁切（{len(overflow_errs)} 条）：{overflow_errs[0]}")
     return errs
 
 
-def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_dir):
+def _finding_key(finding):
+    """跨动效状态的去重键：同一槽同时「越界」与「被裁切」是两条不同诊断，不能互相
+    吞掉，故 how 必须入键；坐标不入键（动效各状态坐标会变），否则同一条会重复上报。
+
+    键全部取自 preview_overflow 的字段，不解析 msg——诊断文案是表现层，改文案
+    不该改变去重行为。
+    """
+    return (finding["sel"], finding["how"], finding.get("txt", ""))
+
+
+def run_preview(tpl_path, cfg, scenes, browser, preview_dir):
     """截图 + 溢出探测。返回 0=OK，1=溢出，2=占位符闸门失败。不调 TTS/ffmpeg。
 
+    cfg 是 prepare_storyboard 产出的 RenderConfig（W/H/style/motion_enabled），
+    与成片阶段共用同一个值——不再把它的字段当散参数重传一遍。
     preview_dir 由调用方给定（缺省为 run 目录的 preview/，#22 产物归属）。
+    返回码由 preview_report_errors（与复用准入同一条判据）判定，不另写一套。
     """
     out_dir = (
         preview_dir if os.path.isabs(preview_dir) else os.path.join(ROOT, preview_dir)
@@ -701,64 +600,55 @@ def run_preview(tpl_path, scenes, style, W, H, motion_enabled, browser, preview_
     os.makedirs(out_dir, exist_ok=True)
     print(f"   → {out_dir}")
     report = []
-    gate_errs = []
+    storyboard_fp = ra.storyboard_fingerprint(tpl_path)
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=browser, headless=True)
-        page = b.new_page(viewport={"width": W, "height": H})
+        page = b.new_page(viewport={"width": cfg.W, "height": cfg.H})
         for i, sc in enumerate(scenes):
-            html = render_html(sc, W, H, style, motion_enabled=motion_enabled)
+            html = render_html(sc, cfg)
             ph_errs = validate_rendered_html(html, i)
-            if ph_errs:
-                gate_errs.extend(ph_errs)
             page.set_content(html)
             kind = resolve_kind(sc)
-            motion = resolve_motion(sc, motion_enabled)
+            motion = resolve_motion(sc, cfg.motion_enabled)
             # 缩略图取 t=0（起点画面），避免截到中间态
-            apply_motion_css_vars(page, *motion_vars(motion, 0.0, 1.0))
+            apply_motion_css_vars(page, motion_vars(motion, 0.0, 1.0))
             png = os.path.join(out_dir, f"s{i}.png")
             # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
             ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
             # 溢出探测覆盖动效可达状态：none 只测静态；其余按各动效自身窗口采样 0..1
             seen, findings = set(), []
             for elapsed, duration in _motion_probe_states(motion):
-                apply_motion_css_vars(page, *motion_vars(motion, elapsed, duration))
-                for sel, msg in preview_overflow(page, W, H, kind=kind):
-                    m = re.search(r"内容='(.*)'$", msg)
-                    key = (sel, m.group(1) if m else msg)
+                apply_motion_css_vars(page, motion_vars(motion, elapsed, duration))
+                for finding in preview_overflow(page, cfg.W, cfg.H, kind=kind):
+                    key = _finding_key(finding)
                     if key in seen:
                         continue
                     seen.add(key)
-                    findings.append((sel, msg))
+                    findings.append(finding)
             report.append(
-                {
-                    "i": i,
-                    "kind": kind,
-                    "motion": motion,
-                    "png": png,
-                    "findings": [{"sel": sel, "msg": msg} for sel, msg in findings],
-                    "placeholder_errs": ph_errs,
-                }
+                preview_report_entry(
+                    i, kind, motion, png, findings, ph_errs, storyboard_fp
+                )
             )
             tag = "OK" if not ph_errs and not findings else "FAIL"
             print(
                 f"   scene {i} [{kind}/{_motion_display_name(motion)}]: {tag}  → {png}"
             )
         b.close()
-    report_path = os.path.join(out_dir, "overflow.json")
+    report_path = ra.preview_report_path(out_dir)
     ra.atomic_write_bytes(
         report_path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
     )
+    gate_errs, overflow_errs, _ = preview_report_errors(report, scenes)
     if gate_errs:
         print("PREVIEW GATE FAILED:")
         for e in gate_errs:
             print(" -", e)
         return 2
-    bad = [r for r in report if r["findings"]]
-    if bad:
-        print(f"PREVIEW FAILED: {len(bad)}/{len(report)} 页有溢出（{report_path}）")
-        for r in bad:
-            for item in r["findings"]:
-                print(f" - scene {r['i']} ({r['kind']}) {item['sel']}: {item['msg']}")
+    if overflow_errs:
+        print(f"PREVIEW FAILED: {len(overflow_errs)} 条溢出/裁切（{report_path}）")
+        for e in overflow_errs:
+            print(" -", e)
         return 1
     print(f"   PREVIEW_OK {len(report)} 页")
     return 0

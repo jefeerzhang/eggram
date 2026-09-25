@@ -14,15 +14,17 @@ verify 勾选串六格图例：✓ 通过、✗ 失败、- 显式跳过、· 因
 由 worker_verify 的 `CHECK <n> <STATE>` 协议行（空白分词）与本 worker 自己实测的
 Step 1/2 结果合成（#25），不解析日志字符位置，未检查项绝不填通过。
 产物归属（#22）：preview 与加工音轨按 run 目录隔离（run_key = 分镜字节 +
-style + motion 开关，见 scripts/run_artifacts.py），同 slug 多 worker 并行互踩
-不再可能；raw 旁白仍共享 `_build/<slug>/`（换皮复用）。verify 传相同的
---style/--no-motion 以精确重定位本次运行。
+style + motion 开关 + templates/ 内容，见 scripts/run_artifacts.py），同 slug 多
+worker 并行互踩不再可能；raw 旁白仍共享 `_build/<slug>/`（换皮复用）。verify 传
+相同的 --style/--no-motion 以精确重定位本次运行。
 输出目标（#23）：省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`
 （皮肤名被规范化改写时追加短指纹防重合），同分镜多皮肤并行各得一个成片；
 显式 output 永远优先，指向同一目标的后启动者覆盖先写者。历史成片不删除。
 预览去重：Step 2 直接跑 `make_video.py --preview` 截图并验溢出，Step 3 传
-`--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关）
-的产物——整个 worker 只截一次图，输入一变 run_key 即变、落到新目录自行预览。
+`--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关 +
+templates/ 内容）的产物——整个 worker 只截一次图，输入或模板一变 run_key 即变、
+落到新目录自行预览；Step 3 复用被拒（exit 4）按 PREVIEW 阶段失败回传，不误报成
+渲染失败。
 """
 
 import argparse
@@ -36,7 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import run_artifacts as ra  # noqa: E402
 import worker_result as wr  # noqa: E402
-from storyboard_gate import resolve_motion_enabled  # noqa: E402
+from storyboard_gate import resolve_motion_enabled, resolve_style_name  # noqa: E402
 
 
 class Parser(argparse.ArgumentParser):
@@ -117,7 +119,8 @@ def main():
     if not style_name:
         try:
             with open(sb, encoding="utf-8") as f:
-                style_name = json.load(f).get("style", "teaching")
+                # 与 prepare_storyboard / worker_verify 同一条规则（resolve_style_name）
+                style_name = resolve_style_name(json.load(f))
         except (OSError, ValueError):
             style_name = "teaching"  # 缺/坏分镜由 preflight 报错，此处仅兜底命名
     out = args.output or ra.default_output_name(slug, style_name)
@@ -134,15 +137,11 @@ def _cache_facts(sb, style_name, no_motion):
     except (OSError, ValueError):
         return None
     manifest = ra.read_manifest(ra.locate_run(ROOT, sb, style_name, motion_enabled))
-    if not manifest or manifest.get("schema") != ra.MANIFEST_SCHEMA:
+    facts = ra.tts_facts(manifest)
+    if facts is None:
         return None
-    if "tts_generated" not in manifest:
-        return None
-    return (
-        f"generated={manifest.get('tts_generated', '?')} "
-        f"reused={manifest.get('tts_reused', '?')} "
-        f"mode={manifest.get('reuse_mode', '?')}"
-    )
+    generated, reused, mode = facts
+    return f"generated={generated} reused={reused} mode={mode}"
 
 
 def _pipeline(args, sb, out, style_name):
@@ -178,20 +177,17 @@ def _pipeline(args, sb, out, style_name):
     if args.reuse_audio:
         cmd.append("--reuse-audio")
     rc, log3 = run_script(cmd)
-    if rc == 3:  # 映射表：make_video exit 3（浏览器缺失）任何阶段归 PREFLIGHT
-        emit(
-            "FAIL_AT_PREFLIGHT",
-            diagnostic=f"render 中 make_video exit 3（浏览器缺失）\n{tail(log3, 100)}",
-        )
-        sys.exit(wr.STAGE_EXITS["PREFLIGHT"])
     if rc != 0:
-        art = out if os.path.isfile(os.path.join(ROOT, out)) else None
-        emit(
-            "FAIL_AT_RENDER",
-            artifact=art,
-            diagnostic=f"make_video.py exit {rc}\n{tail(log3, 100)}",
-        )
-        sys.exit(wr.STAGE_EXITS["RENDER"])
+        # 归因查表（wr.classify_render_exit），不逐码比较数字：make_video 的退出码与
+        # 本 worker 的阶段码共用 1–4，靠分支顺序区分太容易看错。
+        stage, prefix = wr.classify_render_exit(rc)
+        diag = f"{prefix.format(rc=rc)}\n{tail(log3, 100)}"
+        if stage == "RENDER":
+            art = out if os.path.isfile(os.path.join(ROOT, out)) else None
+            emit("FAIL_AT_RENDER", artifact=art, diagnostic=diag)
+        else:
+            emit(f"FAIL_AT_{stage}", diagnostic=diag)
+        sys.exit(wr.STAGE_EXITS[stage])
 
     # Step 4 verify：传与渲染相同的 --style/--no-motion，精确重定位本次 run（#22）。
     # 勾选串由 CHECK 协议行合成（#25）：1/2 用本 worker 实测的 Step 1/2 结果，
