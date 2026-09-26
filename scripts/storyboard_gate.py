@@ -79,7 +79,7 @@ KIND_REGISTRY = {
     "example": KindSpec(
         role="worked_demo",
         layout="layout-example.html",
-        badge="例句",
+        badge="",
         motion="focus",
         arc_phase=2,
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
@@ -811,7 +811,14 @@ def render_html(sc, cfg):
     if think_html is not None:
         slots["__THINK__"] = think_html
     # 单次替换：re.sub 不重扫替换值，避免内容里的 __...__ 被后续槽二次解释
-    return PLACEHOLDER_RE.sub(lambda m: slots.get(m.group(0), m.group(0)), html)
+    rendered = PLACEHOLDER_RE.sub(lambda m: slots.get(m.group(0), m.group(0)), html)
+    # 若本 kind 的 badge 为空(目前仅 example 触发的"不要角标"诉求),
+    # 把整段 <div class="badge"></div> 也清掉,避免画面出现空胶囊。
+    if not KIND_BADGE.get(kind, ""):
+        rendered = re.sub(
+            r'<div class="badge">\s*</div>\s*', '', rendered
+        )
+    return rendered
 
 
 def _layout_needs(kind):
