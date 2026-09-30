@@ -378,20 +378,21 @@ def test_prepare_storyboard_rejects_non_integer_size():
 
 
 def test_preview_reuse_requires_clean_report_of_this_storyboard():
-    """复用准入：报告须存在、属本次分镜、且判据通过（判据由闸门单一表达）。"""
+    """复用准入：报告须存在、属本次分镜+模板、且判据通过（判据由闸门单一表达）。"""
     tpl = load_sample()
     scenes = tpl["scenes"]
     fp = "fp00000000"
+    tfp = "tpl0000000"
     with tempfile.TemporaryDirectory(prefix="pv_") as tmp:
-        missing = mv.preview_reuse_errors(tmp, scenes, fp)
+        missing = mv.preview_reuse_errors(tmp, scenes, fp, tfp)
         assert missing and "未找到" in missing[0]
 
         path = mv.ra.preview_report_path(tmp)
 
-        def entry(i, sc, findings=(), ph=()):
+        def entry(i, sc, findings=(), ph=(), templates_fp=tfp):
             return sg.preview_report_entry(
                 i, sg.resolve_kind(sc), {"type": "none"}, f"s{i}.png",
-                list(findings), list(ph), fp,
+                list(findings), list(ph), fp, templates_fp,
             )
 
         def write_report(entries):
@@ -400,37 +401,45 @@ def test_preview_reuse_requires_clean_report_of_this_storyboard():
 
         report = [entry(i, sc) for i, sc in enumerate(scenes)]
         write_report(report)
-        assert mv.preview_reuse_errors(tmp, scenes, fp) == []
+        assert mv.preview_reuse_errors(tmp, scenes, fp, tfp) == []
 
         report[0] = entry(
             0, scenes[0], findings=[{"sel": ".body", "how": "clip", "msg": "溢出"}]
         )
         write_report(report)
-        assert any("溢出" in e for e in mv.preview_reuse_errors(tmp, scenes, fp))
+        assert any("溢出" in e for e in mv.preview_reuse_errors(tmp, scenes, fp, tfp))
 
         report = [entry(i, sc) for i, sc in enumerate(scenes)]
         report[1] = entry(1, scenes[1], ph=["占位符残留"])
         write_report(report)
         assert any(
-            "占位符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+            "占位符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp, tfp)
         )
 
         # 页数不符
         write_report([entry(0, scenes[0])])
         assert any(
-            "页数" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+            "页数" in e for e in mv.preview_reuse_errors(tmp, scenes, fp, tfp)
         )
 
         # 别人的报告（分镜指纹不符）：显式 --preview-dir 也不能绕过
         write_report([entry(i, sc) for i, sc in enumerate(scenes)])
         assert any(
-            "指纹不符" in e for e in mv.preview_reuse_errors(tmp, scenes, "other")
+            "分镜" in e and "指纹不符" in e
+            for e in mv.preview_reuse_errors(tmp, scenes, "other", tfp)
+        )
+
+        # 模板已变、分镜未变：显式 --preview-dir 也不能复用旧报告
+        write_report([entry(i, sc) for i, sc in enumerate(scenes)])
+        assert any(
+            "模板" in e and "指纹不符" in e
+            for e in mv.preview_reuse_errors(tmp, scenes, fp, "other_tpl")
         )
 
         # 条目顺序不符（同一份报告被重排）→ 不可信
         write_report(list(reversed([entry(i, sc) for i, sc in enumerate(scenes)])))
         assert any(
-            "顺序不符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp)
+            "顺序不符" in e for e in mv.preview_reuse_errors(tmp, scenes, fp, tfp)
         )
 
 

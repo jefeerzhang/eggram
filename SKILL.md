@@ -102,7 +102,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 ## 阶段 2 — 渲视频
 
-> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 跑 `make_video.py --preview` 截图并验溢出，Step 3 传 `--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关 + `templates/` 内容）的产物——复用前必须读到属本次分镜且已通过的 `overflow.json`（页数/顺序/kind/指纹一致、无溢出、无占位符错误），任一不符即停且不配音（exit 4，worker 归 PREVIEW 阶段失败）；直接渲染不传 `--skip-preview`，总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先（指向同一目标的后启动者覆盖先写者），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
+> 两种入口：直接跑 `make_video.py`（小改/调试/单次），或**委托渲染 worker**（批量/CI/父代理要并行写下一份 *分镜*）：`py scripts/render_worker.py examples/<slug>.json --reuse-audio`，5 步 preflight→preview→render→verify→回传不可绕过，契约见 `.scratch/render-worker/spec.md`（map：GitHub #9）。worker 全程只预览一次：Step 2 跑 `make_video.py --preview` 截图并验溢出，Step 3 传 `--skip-preview` 复用同 run 目录（同 run_key = 分镜字节 + style + motion 开关 + `templates/` 内容）的产物——复用前必须读到属本次分镜且已通过的 `overflow.json`（页数/顺序/kind/分镜指纹/模板指纹一致、无溢出、无占位符错误），任一不符即停且不配音（exit 4，worker 归 PREVIEW 阶段失败）；直接渲染不传 `--skip-preview`，总是自行预览。worker 省略 output 时自动命名 `output/<slug>__<最终皮肤>.mp4`——同分镜多皮肤并行各得一个成片，显式 output 永远优先（指向同一目标的后启动者覆盖先写者），旧默认 `output/<slug>.mp4` 可用显式参数继续指定。
 
 **Done when：** 目标 mp4 可播，且下方验收全勾。
 
@@ -140,11 +140,12 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 字段/高亮色 | [`docs/json-schema.md`](docs/json-schema.md) |
 | *公式渲染* / 结构化 formula | [`docs/formulas.md`](docs/formulas.md) |
 | 教学弧/page-role | [`docs/teaching-method.md`](docs/teaching-method.md) |
-| CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser` / `find_browser`） |
+| CLI 参数 / 浏览器发现 | `scripts/make_video.py`（`build_parser`）+ `scripts/toolchain.py`（`browser_path` / `ffmpeg_path`） |
 | 委托渲染 worker | 入口 `scripts/render_worker.py`；子步骤 `scripts/worker_preflight.py` / `worker_verify.py`（Step 2 预览直接跑 `make_video.py --preview`）；产物归属 `scripts/run_artifacts.py`（run 目录：preview+加工音轨+manifest；缺省成片自动命名）；契约 `.scratch/render-worker/` |
-| 闸门规则 / 教学文本转义 | `scripts/storyboard_gate.py`（`prepare_storyboard` / `validate_storyboard` / `validate_layouts`）+ `templates/layout-*.html`；`make_video.py` re-export 兼容 |
+| 闸门规则 / 教学文本转义 | `scripts/storyboard_gate.py`（`prepare_storyboard` / `validate_storyboard` / `validate_layouts`）+ `templates/layout-*.html` |
 | 独立校验（不跑 TTS） | `py scripts/validate_storyboard.py <分镜.json>`（与渲染同一闸门，exit 2 = 失败） |
-| 音频解码 / 缓存版本 | `scripts/make_video.py`（`decode_wav` / `_cache_hit`）+ [`docs/audio.md`](docs/audio.md) |
+| 音频解码 / 缓存命中 | `scripts/make_video.py`（`decode_wav`）+ `scripts/audio_cache.py`（`fingerprint` / `is_hit`）+ [`docs/audio.md`](docs/audio.md) |
+| TTS provider / 音色映射 | `scripts/tts_config.py`（`resolve_tts_provider` / MiniMax voice map）；`--tts-provider` 或分镜顶层 `tts_provider` |
 | 加回归测试 | `tests/test_make_video.py` |
 | 跑全量回归 | `py -m pytest tests/` |
 

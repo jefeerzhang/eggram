@@ -1222,7 +1222,7 @@ def preview_overflow(page, W, H, kind):
 
 
 def preview_report_entry(
-    i, kind, motion, png, findings, placeholder_errs, storyboard_fp
+    i, kind, motion, png, findings, placeholder_errs, storyboard_fp, templates_fp=""
 ):
     """一份报告条目的唯一构造点（字段名只在这里出现）。"""
     return {
@@ -1233,19 +1233,21 @@ def preview_report_entry(
         "findings": findings,
         "placeholder_errs": placeholder_errs,
         "storyboard_fp": storyboard_fp,
+        "templates_fp": templates_fp,
     }
 
 
-def preview_report_errors(report, scenes, storyboard_fp=None):
+def preview_report_errors(report, scenes, storyboard_fp=None, templates_fp=None):
     """按「什么算预览通过」判定一份报告，返回 (gate_errs, overflow_errs, binding_errs)。
 
     - binding_errs：报告不可信——不是列表、页数不符、条目结构/顺序/kind 与本次分镜
-      不一致，或分镜指纹不符（显式 --preview-dir 指向别人的报告时挡住复用）。
+      不一致，或分镜/模板指纹不符（显式 --preview-dir 指向别人或过期报告时挡住复用）。
     - gate_errs：占位符闸门未过（run_preview 返回 2）。
     - overflow_errs：溢出或裁切（run_preview 返回 1）。
 
     两个消费方共用同一判据：run_preview 决定本次预览返回码；复用准入决定能否跳过
-    重截。storyboard_fp=None 表示不校验指纹（本次刚生成的报告无需自证）。
+    重截。storyboard_fp / templates_fp 为 None 表示不校验该指纹（本次刚生成的报告
+    无需自证）。
     """
     if not isinstance(report, list):
         return [], [], ["预览报告不是列表"]
@@ -1273,6 +1275,10 @@ def preview_report_errors(report, scenes, storyboard_fp=None):
         if fps != {storyboard_fp}:
             # 报告级判定，只报一条：条目级重复 9 次没有信息量
             binding_errs.append("预览报告不属于本次分镜（指纹不符）")
+    if templates_fp is not None:
+        tps = {it.get("templates_fp") for it in report if isinstance(it, dict)}
+        if tps != {templates_fp}:
+            binding_errs.append("预览报告不属于当前模板（指纹不符）")
     return gate_errs, overflow_errs, binding_errs
 
 

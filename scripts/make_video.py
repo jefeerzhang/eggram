@@ -1,16 +1,17 @@
 """
 make_video.py — 教学微课渲染器（Skill 阶段 2）
 
-分镜 JSON → 静态闸门（storyboard_gate）→ 预览 → 小米 TTS → 教学动效截帧 → ffmpeg 合成 mp4
+分镜 JSON → 静态闸门（storyboard_gate）→ 预览 → TTS（xiaomi / minimax）→ 教学动效截帧 → ffmpeg 合成 mp4
 
 用法: python scripts/make_video.py examples/now_progressing.json [输出.mp4]
       [--style NAME] [--reuse-audio] [--no-motion] [--preview | --skip-preview]
+      [--tts-provider xiaomi|minimax]
 
 闸门规则、布局选择与页面准备集中在 storyboard_gate.py（唯一规则源）；
 本模块持有运行环境与媒体管线：浏览器发现、TTS、音频加工、编码、预览探测执行。
 预览去重：worker 先用 --preview 单独预验，再以 --skip-preview 渲成片，一次运行
 只截一次图。跳过前必须读到同一目录里通过的 overflow.json（页数/顺序/kind/分镜
-指纹一致，且无溢出、无占位符错误）；缺失或未通过则停，不配音（exit 4）。
+指纹/模板指纹一致，且无溢出、无占位符错误）；缺失或未通过则停，不配音（exit 4）。
 「什么算通过」由 storyboard_gate.preview_report_errors 单一定义，本模块与复用准入
 共用同一条判据。预览目录由 run_key（分镜字节 + style + motion 开关 +
 templates/ 内容）决定。
@@ -90,6 +91,72 @@ def mi_tts(text, voice):
     with urllib.request.urlopen(req, timeout=60) as r:
         js = json.loads(r.read().decode("utf-8"))
     return base64.b64decode(js["choices"][0]["message"]["audio"]["data"])
+
+
+def _mp3_bytes_to_wav_bytes(mp3_bytes, target_rate=SAMPLE_RATE):
+    """MiniMax 返回 mp3 hex,经此函数转成 wav bytes(单声道 16-bit,目标采样率)。"""
+    import imageio_ffmpeg
+
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    proc = subprocess.run(
+        [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "mp3", "-i", "pipe:0",
+            "-ar", str(target_rate), "-ac", "1", "-acodec", "pcm_s16le",
+            "-f", "wav", "pipe:1",
+        ],
+        input=mp3_bytes, capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "MiniMax mp3→wav 转码失败: " + proc.stderr.decode("utf-8", errors="ignore")
+        )
+    return proc.stdout
+
+
+def minimax_tts(text, voice):
+    """MiniMax 同步语音合成(/v1/t2a_v2)。
+
+    返回值与 mi_tts 契约一致:单声道 16-bit wav bytes(24kHz),
+    直接走既有 decode_wav → prepare_scene_audio 链路。
+    """
+    from tts_config import minimax_config, resolve_minimax_voice
+
+    cfg = minimax_config()
+    if not cfg["key"]:
+        raise RuntimeError("未设置环境变量 MINIMAX_API_KEY（MiniMax TTS）")
+    voice_id = resolve_minimax_voice(voice)
+    payload = {
+        "model": cfg["model"],
+        "text": text,
+        "stream": False,
+        "voice_setting": {"voice_id": voice_id, "speed": 1, "vol": 1, "pitch": 0},
+        "audio_setting": {
+            "sample_rate": SAMPLE_RATE,
+            "bitrate": 128000,
+            "format": "mp3",
+            "channel": 1,
+        },
+        "output_format": "hex",
+    }
+    req = urllib.request.Request(
+        cfg["url"], data=json.dumps(payload).encode("utf-8"), method="POST"
+    )
+    req.add_header("Authorization", "Bearer " + cfg["key"])
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        js = json.loads(r.read().decode("utf-8"))
+    if js.get("base_resp", {}).get("status_code") != 0:
+        raise RuntimeError(f"MiniMax API 错误: {js.get('base_resp')}")
+    mp3_bytes = bytes.fromhex(js["data"]["audio"])
+    return _mp3_bytes_to_wav_bytes(mp3_bytes, target_rate=SAMPLE_RATE)
+
+
+def synthesize(text, voice, provider):
+    """统一 TTS 入口:按 provider 分派到 mi_tts / minimax_tts。"""
+    if provider == "minimax":
+        return minimax_tts(text, voice)
+    return mi_tts(text, voice)
 
 
 FADE_SEC = 0.012  # 仅抑咔哒；淡化落在段首/段尾静音区，不吞字
@@ -249,6 +316,12 @@ def build_parser():
         default=None,
         help="预览截图/溢出报告目录（缺省 run 目录 preview/；显式指定可覆盖）",
     )
+    p.add_argument(
+        "--tts-provider",
+        default=None,
+        choices=("xiaomi", "minimax"),
+        help="TTS 引擎：xiaomi（默认）/ minimax；分镜顶层 tts_provider 字段也会被读，CLI 优先",
+    )
     return p
 
 
@@ -278,6 +351,15 @@ def main():
     FPS = int(cfg.fps)
     style, W, H = cfg.style, cfg.W, cfg.H
     scenes = tpl["scenes"]
+    # TTS provider 决策:CLI > 分镜顶层 tts_provider > 默认 xiaomi
+    from tts_config import resolve_tts_provider
+    tts_provider = resolve_tts_provider(
+        storyboard_provider=tpl.get("tts_provider"),
+        cli_provider=getattr(args, "tts_provider", None),
+    )
+    if tts_provider not in ("xiaomi", "minimax"):
+        raise RuntimeError(f"未知 tts_provider: {tts_provider!r}")
+    print(f"   tts_provider={tts_provider}")
     # 单次运行产物归属（#22）：run 目录拥有本次 preview + 加工音轨 + manifest；
     # 可共享的 raw 旁白仍在 _build/<slug>/（旁白+音色指纹，style 不参与）
     slug = os.path.splitext(os.path.basename(tpl_path))[0]
@@ -310,7 +392,10 @@ def main():
     # 成片阶段传 --skip-preview 复用。缺报告、页数不符或仍有溢出则停，不配音。
     if args.skip_preview:
         preview_errs = preview_reuse_errors(
-            preview_out, scenes, ra.storyboard_fingerprint(tpl_path)
+            preview_out,
+            scenes,
+            ra.storyboard_fingerprint(tpl_path),
+            ra.templates_fingerprint(ROOT),
         )
         if preview_errs:
             print("PREVIEW FAILED:")
@@ -337,21 +422,21 @@ def main():
     scene_meta = []
     for i, sc in enumerate(scenes):
         sc_voice = resolve_voice(sc, tpl)
-        raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice)
-        fp = ac.fingerprint(sc["narrate"], sc_voice)
+        raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice, tts_provider)
+        fp = ac.fingerprint(sc["narrate"], sc_voice, tts_provider)
         wav_path = ra.scene_wav(rdir, i, fp)
         hold, hold_err = parse_seconds(sc.get("hold", 0.0))
         if hold_err:
             raise RuntimeError(f"scene {i} {hold_err}（闸门应已拒绝）")
-        if args.reuse_audio and ac.is_hit(raw_path, sc_voice, sc["narrate"]):
+        if args.reuse_audio and ac.is_hit(raw_path, sc_voice, sc["narrate"], tts_provider):
             raw_pcm, rate = read_wav_pcm(raw_path)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(f"{raw_path} 采样率 {rate} != {SAMPLE_RATE}")
             src = "reuse"
         else:
             if args.reuse_audio:
-                print(f"   cache miss scene {i}（旁白/音色变更或无缓存），重 TTS")
-            wav_bytes = mi_tts(sc["narrate"], sc_voice)
+                print(f"   cache miss scene {i}（旁白/音色/provider 变更或无缓存），重 TTS")
+            wav_bytes = synthesize(sc["narrate"], sc_voice, tts_provider)
             raw_pcm, rate, channels, sampwidth = decode_wav(wav_bytes)
             if rate != SAMPLE_RATE:
                 raise RuntimeError(
@@ -366,7 +451,7 @@ def main():
                     f"scene {i} TTS 位深 {sampwidth * 8}bit != 16bit（仅支持 16bit）"
                 )
             write_wav_pcm(raw_path, raw_pcm, SAMPLE_RATE)
-            ac.write_meta(raw_path, sc_voice, sc["narrate"], SAMPLE_RATE)
+            ac.write_meta(raw_path, sc_voice, sc["narrate"], SAMPLE_RATE, tts_provider)
             src = "tts"
         pcm, n_frames, dur, narr_frames = prepare_scene_audio(raw_pcm, hold, FPS)
         write_wav_pcm(wav_path, pcm, SAMPLE_RATE)
@@ -551,10 +636,10 @@ def main():
 # ---- 音频缓存与工具定位：契约分别在 audio_cache / toolchain（纯 stdlib）----
 
 
-def preview_reuse_errors(preview_dir, scenes, storyboard_fp):
+def preview_reuse_errors(preview_dir, scenes, storyboard_fp, templates_fp=None):
     """--skip-preview 的准入检查。返回错误列表；空列表表示可以复用、不必重截。
 
-    本函数只管「报告在不在、读不读得动」；「什么算通过、报告是否属于本次分镜」
+    本函数只管「报告在不在、读不读得动」；「什么算通过、报告是否属于本次分镜/模板」
     由 storyboard_gate.preview_report_errors 这一条判据决定（唯一规则源）。
     """
     path = ra.preview_report_path(preview_dir)
@@ -566,7 +651,7 @@ def preview_reuse_errors(preview_dir, scenes, storyboard_fp):
     except (OSError, json.JSONDecodeError) as e:
         return [f"预览报告无法读取: {path} ({e})"]
     gate_errs, overflow_errs, binding_errs = preview_report_errors(
-        report, scenes, storyboard_fp
+        report, scenes, storyboard_fp, templates_fp
     )
     errs = [f"{e}（{path}）" for e in binding_errs]
     if gate_errs:
@@ -601,6 +686,7 @@ def run_preview(tpl_path, cfg, scenes, browser, preview_dir):
     print(f"   → {out_dir}")
     report = []
     storyboard_fp = ra.storyboard_fingerprint(tpl_path)
+    templates_fp = ra.templates_fingerprint(ROOT)
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=browser, headless=True)
         page = b.new_page(viewport={"width": cfg.W, "height": cfg.H})
@@ -627,7 +713,14 @@ def run_preview(tpl_path, cfg, scenes, browser, preview_dir):
                     findings.append(finding)
             report.append(
                 preview_report_entry(
-                    i, kind, motion, png, findings, ph_errs, storyboard_fp
+                    i,
+                    kind,
+                    motion,
+                    png,
+                    findings,
+                    ph_errs,
+                    storyboard_fp,
+                    templates_fp,
                 )
             )
             tag = "OK" if not ph_errs and not findings else "FAIL"

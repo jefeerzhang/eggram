@@ -99,6 +99,6 @@
 - layout = 结构槽 `__HEADER__` / `__BODY__` / `__THINK__`（仅 practice） / … + 居中构图
 - *闸门*：`py scripts/validate_storyboard.py <json>`（教学弧顺序 + `practice.hold>=5.0`；exit 0）
 - 预览：`py scripts/make_video.py <json> --preview`（缩略图 + 溢出）；全量渲染会先跑同一预览，通过后再 TTS
-- `--skip-preview` 复用同 run 目录已通过的 `overflow.json`（页数/顺序/kind/分镜指纹一致且无溢出、无占位符错误）；任一不符即停且不配音（exit 4）。run 目录由分镜字节 + style + motion 开关 + `templates/` 内容决定，改模板或分镜即换目录
+- `--skip-preview` 复用同 run 目录已通过的 `overflow.json`（页数/顺序/kind/分镜指纹/模板指纹一致且无溢出、无占位符错误）；任一不符即停且不配音（exit 4）。run 目录由分镜字节 + style + motion 开关 + `templates/` 内容决定，改模板或分镜即换目录；显式 `--preview-dir` 也会核对模板指纹，防止旧报告绕过
 
 > Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默失败、零输出）；macOS/Linux 用 `python3`。

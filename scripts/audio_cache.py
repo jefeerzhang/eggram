@@ -14,17 +14,18 @@ import os
 import run_artifacts as ra
 
 # 音频缓存解码版本。错误解码路径生成的旧 raw 无此版本号，缓存不命中。
-CACHE_VERSION = "2"
+# v3：缓存指纹加 provider 维度，小米/MiniMax 两套 TTS 互不污染。
+CACHE_VERSION = "3"
 
 
-def fingerprint(narrate, voice):
-    """8 字符内容指纹。voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
-    return hashlib.sha256(f"{voice}|{narrate}".encode()).hexdigest()[:8]
+def fingerprint(narrate, voice, provider="xiaomi"):
+    """8 字符内容指纹。provider/voice/narrate 任一变化 → 路径变化 → 缓存失效。"""
+    return hashlib.sha256(f"{provider}|{voice}|{narrate}".encode()).hexdigest()[:8]
 
 
-def paths(cache_dir, i, narrate, voice):
+def paths(cache_dir, i, narrate, voice, provider="xiaomi"):
     """本次旁白的 (raw 下载件, 加工件) 路径。"""
-    fp = fingerprint(narrate, voice)
+    fp = fingerprint(narrate, voice, provider)
     return (
         os.path.join(cache_dir, f"s{i}_{fp}_raw.wav"),
         os.path.join(cache_dir, f"s{i}_{fp}.wav"),
@@ -36,13 +37,14 @@ def meta_path(raw_path):
     return raw_path + ".meta.json"
 
 
-def write_meta(raw_path, voice, narrate, rate):
+def write_meta(raw_path, voice, narrate, rate, provider="xiaomi"):
     meta = {
         "ver": CACHE_VERSION,
+        "provider": provider,
         "voice": voice,
         "narrate": narrate,
         "rate": rate,
-        "fp": fingerprint(narrate, voice),
+        "fp": fingerprint(narrate, voice, provider),
     }
     ra.atomic_write_bytes(
         meta_path(raw_path),
@@ -50,8 +52,8 @@ def write_meta(raw_path, voice, narrate, rate):
     )
 
 
-def is_hit(raw_path, voice, narrate):
-    """raw 存在 + sidecar meta 与旁白/音色一致且为当前解码版本才命中。
+def is_hit(raw_path, voice, narrate, provider="xiaomi"):
+    """raw 存在 + sidecar meta 与旁白/音色/provider 一致且为当前解码版本才命中。
 
     两侧都查：只有 meta 而 raw 缺失（手工清理、写到一半）时若算命中，
     渲染器随后会拿着不存在的路径去解码，报的却是解码错误。
@@ -68,7 +70,8 @@ def is_hit(raw_path, voice, narrate):
         return False
     return (
         meta.get("ver") == CACHE_VERSION
+        and meta.get("provider", "xiaomi") == provider
         and meta.get("voice") == voice
         and meta.get("narrate") == narrate
-        and meta.get("fp") == fingerprint(narrate, voice)
+        and meta.get("fp") == fingerprint(narrate, voice, provider)
     )

@@ -22,6 +22,12 @@ def test_fingerprint_tracks_voice_and_narrate():
     assert len(ac.fingerprint("旁白", "苏打")) == 8
 
 
+def test_fingerprint_tracks_provider():
+    assert ac.fingerprint("旁白", "苏打", "xiaomi") != ac.fingerprint(
+        "旁白", "苏打", "minimax"
+    )
+
+
 def test_paths_are_distinct_and_carry_the_fingerprint():
     raw, wav = ac.paths("d", 3, "旁白", "苏打")
     assert raw.endswith("_raw.wav") and wav.endswith(".wav")
@@ -36,6 +42,7 @@ def test_meta_roundtrip_fields():
         ac.write_meta(raw, "苏打", "旁白", 24000)
         meta = json.load(open(ac.meta_path(raw), encoding="utf-8"))
         assert meta["ver"] == ac.CACHE_VERSION
+        assert meta["provider"] == "xiaomi"
         assert meta["voice"] == "苏打" and meta["narrate"] == "旁白"
         assert meta["rate"] == 24000
         assert meta["fp"] == ac.fingerprint("旁白", "苏打")
@@ -60,6 +67,16 @@ def test_hit_rejects_mismatched_voice_or_narrate():
         ac.write_meta(raw, "苏打", "旁白", 24000)
         assert ac.is_hit(raw, "冰糖", "旁白") is False
         assert ac.is_hit(raw, "苏打", "换了旁白") is False
+
+
+def test_hit_rejects_mismatched_provider():
+    with tempfile.TemporaryDirectory() as d:
+        raw, _ = ac.paths(d, 0, "旁白", "苏打", "xiaomi")
+        with open(raw, "wb") as f:
+            f.write(b"\0\0")
+        ac.write_meta(raw, "苏打", "旁白", 24000, "xiaomi")
+        assert ac.is_hit(raw, "苏打", "旁白", "minimax") is False
+        assert ac.is_hit(raw, "苏打", "旁白", "xiaomi") is True
 
 
 def test_hit_rejects_other_decode_version():

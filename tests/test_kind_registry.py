@@ -101,10 +101,10 @@ def test_arc_phases_span_the_documented_arc():
     assert sorted(set(phases.values())) == list(range(len(set(phases.values()))))
 
 
-def test_only_title_has_an_empty_badge():
-    """空 badge 是 title 的刻意选择；别的 kind 漏填 badge 就是缺陷。"""
-    empty = [k for k in KINDS if not sg.KIND_REGISTRY[k].badge]
-    assert empty == ["title"], empty
+def test_only_title_and_example_have_empty_badge():
+    """空 badge 是 title / example 的刻意选择；别的 kind 漏填 badge 就是缺陷。"""
+    empty = sorted(k for k in KINDS if not sg.KIND_REGISTRY[k].badge)
+    assert empty == ["example", "title"], empty
 
 
 def test_every_kind_declares_a_motion_in_the_allowed_set():

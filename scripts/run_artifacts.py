@@ -71,6 +71,17 @@ def storyboard_fingerprint(storyboard_path):
     return h.hexdigest()[:10]
 
 
+def templates_fingerprint(root=None):
+    """templates/ 内容的短指纹。
+
+    与 storyboard_fingerprint 一起写进 overflow.json：显式 --preview-dir 指向旧报告时，
+    即使分镜字节未变，改过 layout/skin 也不能复用（与 run_key 的 templates 口径一致）。
+    """
+    h = hashlib.sha256()
+    render_inputs_digest(h, root)
+    return h.hexdigest()[:10]
+
+
 def run_key(storyboard_path, style_name, motion_enabled, root=None):
     """确定性 run 标识：同文件+同配置+同模板 → 同 key（verify 可精确重定位）；
     来源不同、style 不同、motion 开关不同、模板/皮肤内容不同 → 不同 key
@@ -155,7 +166,11 @@ def write_manifest(rdir, manifest):
 
 
 def read_manifest(rdir):
-    """返回 manifest dict；不存在或损坏返回 None（调用方决定回退/失败）。"""
+    """返回 manifest dict；不存在或损坏返回 None。
+
+    验收侧：None / 非当前 schema 即检查 4 失败——不回退到共享 raw 目录猜文件名
+    （见 docs/audio.md 产物归属；b7f03c5 起已删 pre-#22 兼容回退）。
+    """
     p = manifest_path(rdir)
     if not os.path.isfile(p):
         return None

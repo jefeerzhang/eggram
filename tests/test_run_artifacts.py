@@ -60,6 +60,25 @@ def test_run_key_stable_and_discriminating():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_templates_fingerprint_tracks_template_bytes():
+    d = _mkdtemp("ra_tfp_")
+    try:
+        root = os.path.join(d, "repo")
+        tdir = os.path.join(root, "templates")
+        os.makedirs(tdir)
+        path = os.path.join(tdir, "layout-rule.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("<div>A</div>")
+        fp1 = ra.templates_fingerprint(root)
+        assert fp1 == ra.templates_fingerprint(root)
+        assert len(fp1) == 10
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("<div>B</div>")
+        assert fp1 != ra.templates_fingerprint(root)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_run_key_includes_template_contents():
     """模板/皮肤内容也要参与 run 标识。
 

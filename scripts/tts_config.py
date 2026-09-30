@@ -49,19 +49,38 @@ MINIMAX_VOICE_MAP = {
 }
 
 
-def resolve_minimax_voice(friendly_name):
-    """把分镜里的中文名映射成 MiniMax voice_id。
+def _looks_like_minimax_voice_id(value):
+    """判断字符串是否像 MiniMax 平台 voice_id（高级直通），而非中文友好名。
 
-    若用户写了未在表里的中文名,且看起来就是 voice_id 原值(含下划线/字母),
-    原样返回(允许"高级用户"直通平台音色);否则回退默认。
+    平台 voice_id 总含 ASCII 字母，并常带 `_` / `-` / 空格 / 半角或全角括号
+   （如 ``Chinese (Mandarin)_Gentle_Senior``、``Cantonese_ProfessionalHost（F)``）。
+    纯中文友好名（如「冰糖」）不含 ASCII 字母，不应直通。
+    """
+    s = str(value).strip()
+    if not s:
+        return False
+    has_ascii_letter = any("A" <= c <= "Z" or "a" <= c <= "z" for c in s)
+    if not has_ascii_letter:
+        return False
+    allowed = set(" _-()（）")
+    return all(
+        ("A" <= c <= "Z")
+        or ("a" <= c <= "z")
+        or c.isdigit()
+        or c in allowed
+        for c in s
+    )
+
+
+def resolve_minimax_voice(friendly_name):
+    """把分镜里的中文友好名映射成 MiniMax voice_id。
+
+    映射表未命中时：若像平台 voice_id 原值则直通；否则回退默认音色。
     """
     if friendly_name in MINIMAX_VOICE_MAP:
         return MINIMAX_VOICE_MAP[friendly_name]
-    # 直通策略:含字母+下划线或字母开头,当 voice_id 用
-    s = str(friendly_name).strip()
-    if s and (s.replace("_", "").replace(" ", "").replace("(", "").replace(")", "").isalnum()
-              or any(c.isalpha() for c in s)):
-        return s
+    if _looks_like_minimax_voice_id(friendly_name):
+        return str(friendly_name).strip()
     # 兜底:甜美女性音色,中文教学最稳的默认值
     return "female-tianmei"
 
