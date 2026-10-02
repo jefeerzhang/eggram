@@ -1005,6 +1005,56 @@ def test_chart_fn_presets_and_unknown_falls_back_to_linear():
     assert screen_ys("no-such-fn") == screen_ys("1 - t")  # 未知表达式兜底
 
 
+# ---- 10c 图解文本与颜色转义 ----
+
+
+def test_chart_labels_and_axis_names_cannot_escape_text_node():
+    """chart 的 label / 轴名当纯文本处理。
+
+    页面由 headless Chromium 截图，HTML 文档里的内联 <svg> 中 <script> 会执行，
+    所以分镜里带过来的 "</text><script>" 不是排版问题，是执行面。
+    """
+    chart = {
+        "preset": "curve",
+        "axes": {"x": "Q</text><script>alert(1)</script>", "y": "MU<image href=x>"},
+        "range": {"xmin": 0, "xmax": 5, "ymin": 0, "ymax": 100},
+        "curve": {"points": [{"x": 0, "y": 0}, {"x": 5, "y": 100}]},
+        "highlights": [{"x": 2, "y": 40, "label": "</text><script>exfil()</script>"}],
+    }
+    svg = sg.resolve_chart(chart, sg.style_token_map(sg.load_style("teaching")))
+    assert "<script>" not in svg
+    assert "<image" not in svg
+    # 内容不丢：转义后仍以字面形式留在文本节点里
+    assert "Q&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in svg
+    assert "&lt;/text&gt;&lt;script&gt;exfil()&lt;/script&gt;" in svg
+
+
+def test_chart_colors_and_width_cannot_break_out_of_attribute():
+    """color / width 插进单引号属性位，带引号即破出，能挂上事件处理器。"""
+    chart = {
+        "preset": "curve",
+        "range": {"xmin": 0, "xmax": 5, "ymin": 0, "ymax": 100},
+        "curve": {
+            "color": "' onmouseover='pwn()",
+            "width": "5' onload='pwn()",
+            "points": [{"x": 0, "y": 0}, {"x": 5, "y": 100}],
+        },
+        "highlights": [{"x": 2, "y": 40, "label": "L", "color": "' x='"}],
+    }
+    svg = sg.resolve_chart(chart, sg.style_token_map(sg.load_style("teaching")))
+    assert " onmouseover='pwn()" not in svg
+    assert " onload='pwn()" not in svg
+    assert " x='' x='" not in svg
+    assert "&#x27; onmouseover=&#x27;pwn()" in svg
+    assert "&#x27; x=&#x27;" in svg
+
+
+def test_chart_hand_written_svg_stays_raw():
+    """字符串分支是文档承诺的兼容口（作者自己的 SVG），不转义。"""
+    raw = "<svg><script>author-owned()</script></svg>"
+    assert sg.resolve_chart(raw, sg.style_token_map(sg.load_style("teaching"))) == raw
+
+
 # ---- 11 公式页分步动效时间线 ----
 
 
@@ -1614,3 +1664,73 @@ def test_style_name_agrees_with_prepare_storyboard():
     assert prep["cfg"].style_name == "classroom"
     assert sg.resolve_style_name(tpl) == prep["cfg"].style_name
     assert sg.resolve_style_name(tpl, "explainer") == "explainer"
+
+
+# ---- 不可信输入边界：皮肤名与 diagram 的 chart ----
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../templates/style-teaching",
+        "x\\..\\..\\examples\\opportunity_cost",  # Windows 按词法折 ..，实测读到了 templates 外
+        "a/b",
+        "/etc/passwd",
+        "..",
+    ],
+)
+def test_load_style_rejects_names_that_escape_template_dir(bad):
+    """皮肤名可以来自分镜顶层 style 字段，所以不是只有 CLI 才会碰到它。
+
+    名字直接拼进 f"style-{name}.json"，Windows 上 ".." 会先做词法折叠，
+    于是能把任意 .json 当皮肤读进来（读到的色值还会被画进帧里）。
+    """
+    with pytest.raises(ValueError, match="风格名"):
+        sg.load_style(bad)
+
+
+def test_load_style_still_reports_missing_skin_as_file_not_found():
+    """守卫只管路径，不改变「皮肤不存在」这条原有通道。"""
+    with pytest.raises(FileNotFoundError):
+        sg.load_style("no-such-skin")
+
+
+def test_load_style_allows_a_skin_name_with_a_space(monkeypatch):
+    """带空格的真皮肤名（"a b"）照旧可用——守卫只拦路径成分。
+
+    这条是被现有测试逼出来的：test_render_worker 用 "a b" 与 "a_b" 验证
+    输出名规范化不会撞车，若把空格一并禁掉就是行为回归。
+    """
+    with tempfile.TemporaryDirectory(prefix="skin_space_") as d:
+        shipped = sg.load_style("teaching")
+        with open(os.path.join(d, "style-a b.json"), "w", encoding="utf-8") as f:
+            json.dump(shipped, f, ensure_ascii=False)
+        monkeypatch.setattr(sg, "TEMPLATE_DIR", d)
+        assert sg.load_style("a b") == shipped
+
+
+def test_diagram_requires_a_renderable_chart():
+    """diagram 缺 chart 或 preset 写错时闸门照样放行，成片是一张空图。"""
+
+    def chart_errors(**extra):
+        sc = {"kind": "diagram", "header": "H", "body": "B", "narrate": "N"}
+        sc.update(extra)
+        errors, _ = sg.validate_storyboard(
+            {"title": "T", "voice": "mimo_default", "scenes": [sc]}
+        )
+        return [e for e in errors if "chart" in e]
+
+    for label, bad in [
+        ("缺字段", {}),
+        ("空对象", {"chart": {}}),
+        ("空字符串", {"chart": ""}),
+        ("未知 preset", {"chart": {"preset": "bar"}}),
+    ]:
+        assert chart_errors(**bad), f"{label} 应当被拦，却放行了"
+
+    ok = {
+        "preset": "curve",
+        "curve": {"points": [{"x": 0, "y": 0}, {"x": 1, "y": 1}]},
+    }
+    assert not chart_errors(chart=ok), chart_errors(chart=ok)
+    assert not chart_errors(chart="<svg viewBox='0 0 500 320'></svg>")

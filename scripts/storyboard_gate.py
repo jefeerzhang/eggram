@@ -13,14 +13,13 @@ storyboard_gate.py — 分镜准备与静态闸门（唯一规则源）
 不覆盖已显式设置的环境变量；缺包或缺文件时静默跳过。
 """
 
-import html
 import json
 import math
 import os
 import re
 from collections import namedtuple
 
-from charts import resolve_chart
+from charts import resolve_chart, svg_escape
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(ROOT, "templates")
@@ -348,6 +347,16 @@ def validate_style(style, source="<style>"):
 
 
 def load_style(style_name="teaching"):
+    # 皮肤名可以来自分镜顶层 style 字段（不只是 CLI），所以它属于不可信输入：
+    # 名字直接拼进 f"style-{name}.json"，Windows 会先按词法折叠 ".."，于是能把
+    # templates/ 之外的任意 .json 当皮肤读进来，色值再被画进帧里。
+    # 只拦路径成分，不拦空格——"a b" 这类带空格的真皮肤名一直在用。
+    s = str(style_name)
+    if not s or "\x00" in s or "/" in s or "\\" in s or ".." in s:
+        raise ValueError(
+            f"风格名不合法: {style_name!r}——须是 templates/ 下的扁平文件名，"
+            "不得含 / \\ 或 .."
+        )
     path = os.path.join(TEMPLATE_DIR, f"style-{style_name}.json")
     if not os.path.isfile(path):
         raise FileNotFoundError(f"风格文件不存在: {path}")
@@ -511,8 +520,8 @@ def _escape(text):
     白名单标签：<br> / <sub> / <sup> 透传（公式上下标需求），其它 <...> 仍 escape。
     正文里的 @BR@ 或字面 &lt;sub&gt; 都不会被还原成真标签——还原只认转义后的标签形态。
     """
-    s = str(text).replace("\x00", "").replace("\\n", "\n")
-    s = html.escape(s, quote=True).replace("_", "&#95;").replace("\n", "<br>")
+    s = str(text).replace("\\n", "\n")
+    s = svg_escape(s).replace("_", "&#95;").replace("\n", "<br>")
     for pattern, tag in _WHITELIST_TAGS:
         s = pattern.sub(tag, s)
     return s
@@ -990,6 +999,18 @@ def validate_storyboard(tpl):
                 )
             elif LEAK_RE.match(wrong_body.strip()):
                 errors.append(f"{prefix}: wrong_body={wrong_body!r} 像样式泄漏")
+        if kind == "diagram":
+            chart = sc.get("chart")
+            if isinstance(chart, str):
+                if not chart.strip():
+                    errors.append(
+                        f"{prefix}: diagram 须提供非空 chart（曲线图对象或手写 SVG）"
+                    )
+            elif not (isinstance(chart, dict) and chart.get("preset") == "curve"):
+                errors.append(
+                    f'{prefix}: diagram 的 chart 须为 {{preset: "curve"}} 对象'
+                    "（或非空手写 SVG 字符串），其它写法渲成一张空图"
+                )
         # 检查每页 voice 字段（支持角色 ID 或直接音色名）
         sc_voice = sc.get("voice")
         if sc_voice and sc_voice not in voices_map and sc_voice not in VOICE_WHITELIST:

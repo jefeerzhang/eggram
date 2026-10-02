@@ -73,16 +73,24 @@ def test_browser_explicit_missing_raises():
         tc.browser_path(r"C:\definitely\missing\chrome.exe")
 
 
-def test_browser_prefers_available_candidate(monkeypatch):
-    edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-    monkeypatch.setenv("BROWSER_PATH", r"C:\missing\chrome.exe")
-    monkeypatch.setattr(tc.shutil, "which", lambda name: None)
+def test_browser_prefers_first_existing_candidate(monkeypatch):
+    """候选列表里跳过不存在的，返回第一个存在的。
 
-    def fake_isfile(p):
-        return p == edge
-
-    monkeypatch.setattr(tc.os.path, "isfile", fake_isfile)
-    assert tc.browser_path() == edge
+    旧实现拿 Windows 的 Edge 安装路径当「存在的那个候选」，靠 monkeypatch
+    os.path.isfile 让它成立；POSIX 上 os.path.join 拼不出那串反斜杠字面，
+    候选里根本没有它 → browser_path() 返回 None，测试恒红。这里自建候选，
+    与平台的路径写法无关，也不再改写全局 os.path。
+    """
+    with tempfile.TemporaryDirectory(prefix="tc_browser_") as d:
+        real = os.path.join(d, "browser.exe")
+        open(real, "wb").close()
+        cands = [
+            os.path.join(d, "missing.exe"),
+            real,
+            os.path.join(d, "second.exe"),
+        ]
+        monkeypatch.setattr(tc, "_candidate_browser_paths", lambda: cands)
+        assert tc.browser_path() == cands[1]
 
 
 def test_candidate_paths_includes_env_override(monkeypatch):
