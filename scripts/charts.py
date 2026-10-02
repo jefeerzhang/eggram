@@ -12,6 +12,7 @@ charts.py — 出版级 SVG 矢量图解生成器
 用法：在 make_video.py 中 from charts import resolve_chart
 """
 
+import html
 import math
 
 # ── viewBox 常量 ──────────────────────────────────────────────────────────────
@@ -19,6 +20,19 @@ _VW, _VH = 500, 320
 _PAD_L, _PAD_R, _PAD_T, _PAD_B = 60, 30, 30, 40
 _PX = _VW - _PAD_L - _PAD_R  # 绘图区宽 410
 _PY = _VH - _PAD_T - _PAD_B  # 绘图区高 250
+
+
+def svg_escape(value):
+    """把任意值转成能安全插进 SVG 文本节点或单引号属性位的文本。
+
+    这是 storyboard_gate._escape 的底座——教学字段在这里转义之后再加
+    `<br>/<sub>/<sup>` 白名单；图解字段只走到这一层，标签里的 `<sub>` 不解析。
+    手写 SVG 走 resolve_chart 的字符串分支，是作者自己的文件，不经这里。
+    """
+    return html.escape(str(value).replace("\x00", ""), quote=True)
+
+
+_esc = svg_escape
 
 
 def _xpx(x, xmin, xmax):
@@ -44,8 +58,8 @@ def _svg_text(
 ):
     font = "font-family='SF Mono','Consolas','Courier New',monospace" if mono else ""
     return (
-        f"<text x='{x}' y='{y}' fill='{color}' font-size='{size}' "
-        f"font-weight='{weight}' text-anchor='{anchor}' {font}>{text}</text>"
+        f"<text x='{x}' y='{y}' fill='{_esc(color)}' font-size='{size}' "
+        f"font-weight='{weight}' text-anchor='{anchor}' {font}>{_esc(text)}</text>"
     )
 
 
@@ -65,11 +79,11 @@ def _draw_axes(
     # 坐标轴线
     parts.append(
         f"<line x1='{_PAD_L}' y1='{_PAD_T + _PY}' x2='{_PAD_L + _PX}' y2='{_PAD_T + _PY}' "
-        f"stroke='{ink_sub}' stroke-width='1.5' stroke-linecap='round' opacity='0.5'/>"
+        f"stroke='{_esc(ink_sub)}' stroke-width='1.5' stroke-linecap='round' opacity='0.5'/>"
     )
     parts.append(
         f"<line x1='{_PAD_L}' y1='{_PAD_T + _PY}' x2='{_PAD_L}' y2='{_PAD_T}' "
-        f"stroke='{ink_sub}' stroke-width='1.5' stroke-linecap='round' opacity='0.5'/>"
+        f"stroke='{_esc(ink_sub)}' stroke-width='1.5' stroke-linecap='round' opacity='0.5'/>"
     )
     # X 刻度
     if xticks is None:
@@ -79,7 +93,7 @@ def _draw_axes(
         xp = _xpx(xt, xmin, xmax)
         parts.append(
             f"<line x1='{xp}' y1='{_PAD_T + _PY}' x2='{xp}' y2='{_PAD_T + _PY + 4}' "
-            f"stroke='{ink_sub}' stroke-width='1' opacity='0.5'/>"
+            f"stroke='{_esc(ink_sub)}' stroke-width='1' opacity='0.5'/>"
         )
         parts.append(
             _svg_text(
@@ -94,7 +108,7 @@ def _draw_axes(
         yp = _ypx(yt, ymin, ymax)
         parts.append(
             f"<line x1='{_PAD_L - 4}' y1='{yp}' x2='{_PAD_L}' y2='{yp}' "
-            f"stroke='{ink_sub}' stroke-width='1' opacity='0.5'/>"
+            f"stroke='{_esc(ink_sub)}' stroke-width='1' opacity='0.5'/>"
         )
         parts.append(
             _svg_text(
@@ -115,9 +129,9 @@ def _draw_axes(
     )
     # Y 轴标签竖排
     parts.append(
-        f"<text x='12' y='{_PAD_T + _PY / 2}' fill='{ink_sub}' font-size='13' "
+        f"<text x='12' y='{_PAD_T + _PY / 2}' fill='{_esc(ink_sub)}' font-size='13' "
         f"font-weight='600' text-anchor='middle' "
-        f"transform='rotate(-90,12,{_PAD_T + _PY / 2})'>{ylabel}</text>"
+        f"transform='rotate(-90,12,{_PAD_T + _PY / 2})'>{_esc(ylabel)}</text>"
     )
     return "\n".join(parts)
 
@@ -219,12 +233,12 @@ def build_curve_svg(chart, colors):
 
     # 主路径（静态，始终可见作为底图）
     parts.append(
-        f"<path d='{d}' fill='none' stroke='{curve_color}' stroke-width='{curve_width}' "
+        f"<path d='{d}' fill='none' stroke='{_esc(curve_color)}' stroke-width='{_esc(curve_width)}' "
         f"stroke-linecap='round' stroke-linejoin='round' opacity='0.25'/>"
     )
     # 动画路径（描画效果）
     parts.append(
-        f"<path d='{d}' fill='none' stroke='{curve_color}' stroke-width='{curve_width}' "
+        f"<path d='{d}' fill='none' stroke='{_esc(curve_color)}' stroke-width='{_esc(curve_width)}' "
         f"stroke-linecap='round' stroke-linejoin='round' "
         f"class='draw-path' pathLength='1'/>"
     )
@@ -240,7 +254,7 @@ def build_curve_svg(chart, colors):
 
         # 脉冲圆圈
         parts.append(
-            f"<circle cx='{hx}' cy='{hy}' r='7' fill='{hl_color}' "
+            f"<circle cx='{hx}' cy='{hy}' r='7' fill='{_esc(hl_color)}' "
             f"class='glow-point' style='animation-delay:{delay:.1f}s'/>"
         )
         # 标签盒以点为中心，再按盒宽把中心夹回画布内：靠边的点若继续外推会被裁掉
@@ -259,7 +273,7 @@ def build_curve_svg(chart, colors):
             ly = hy + 22
         parts.append(
             f"<rect x='{lx - lw / 2}' y='{ly - 11}' width='{lw}' height='16' "
-            f"rx='3' fill='{surface}' class='stagger-item' "
+            f"rx='3' fill='{_esc(surface)}' class='stagger-item' "
             f"style='animation-delay:{delay:.1f}s'/>"
         )
         parts.append(
