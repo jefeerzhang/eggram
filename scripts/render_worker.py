@@ -2,6 +2,7 @@
 
 用法: py scripts/render_worker.py examples/<slug>.json [output.mp4]
       (--reuse-audio | --no-reuse-audio) [--style NAME] [--no-motion] [--browser PATH]
+      [--tts-provider xiaomi|minimax]
 
 5 步固定流水线：preflight → preview → render → verify → 回传；前序失败即短路，
 后续阶段不执行。退出码映射见 scripts/worker_result.py（0=OK 1=PREFLIGHT
@@ -97,6 +98,12 @@ def main():
     ap.add_argument("--style", default=None)
     ap.add_argument("--no-motion", action="store_true")
     ap.add_argument("--browser", default=None)
+    ap.add_argument(
+        "--tts-provider",
+        choices=("xiaomi", "minimax"),
+        default=None,
+        help="TTS 引擎（优先于分镜顶层 tts_provider；透传 preflight / make_video / verify）",
+    )
     args = ap.parse_args()
 
     if not args.reuse_audio and not args.no_reuse_audio:
@@ -149,6 +156,7 @@ def _pipeline(args, sb, out, style_name):
     rc, log1 = run_script(
         ["scripts/worker_preflight.py", sb]
         + (["--browser", args.browser] if args.browser else [])
+        + (["--tts-provider", args.tts_provider] if args.tts_provider else [])
     )
     if rc != 0:
         emit("FAIL_AT_PREFLIGHT", diagnostic=tail(log1, 50))
@@ -164,6 +172,8 @@ def _pipeline(args, sb, out, style_name):
         common_options.append("--no-motion")
     if args.browser:
         common_options += ["--browser", args.browser]
+    if args.tts_provider:
+        common_options += ["--tts-provider", args.tts_provider]
     rc, log2 = run_script(
         ["scripts/make_video.py", sb, out, "--preview"] + common_options
     )
@@ -200,6 +210,8 @@ def _pipeline(args, sb, out, style_name):
         cmd.append("--no-motion")
     if args.reuse_audio:
         cmd.append("--expect-reuse-audio")
+    if args.tts_provider:
+        cmd += ["--tts-provider", args.tts_provider]
     rc, log4 = run_script(cmd)
     marks = wr.marks_line((wr.PASS, wr.PASS), wr.parse_check_lines(log4))
     # #24：渲染完成后才有本次 run 的 manifest，事实只在成功路径后读取

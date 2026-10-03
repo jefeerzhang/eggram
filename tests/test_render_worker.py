@@ -58,6 +58,52 @@ def tts_url(request):
             thread.join()
 
 
+@pytest.fixture
+def minimax_tts_url():
+    """MiniMax /v1/t2a_v2 形状的本地 stand-in：`data.audio` 是 mp3 的 hex。
+
+    与小米 adapter 不同，MiniMax 回 mp3（make_video 自己过 ffmpeg 转 wav），
+    所以这里用 ffmpeg 现造一段 0.2s 静音 mp3；同时计数收到的 POST。
+    """
+    import imageio_ffmpeg
+
+    mp3 = subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.2",
+            "-c:a", "libmp3lame", "-f", "mp3", "pipe:1",
+        ],
+        capture_output=True,
+    ).stdout
+    assert mp3, "ffmpeg 未能生成 mp3 测试负载"
+    payload = json.dumps(
+        {"base_resp": {"status_code": 0}, "data": {"audio": mp3.hex()}}
+    ).encode()
+    counter = {"post": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            counter["post"] += 1
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}/v1/t2a_v2", counter
+        finally:
+            server.shutdown()
+            thread.join()
+
+
 @pytest.mark.parametrize("override", ["style", "no-motion", "browser"])
 def test_worker_accepts_preview_configuration_overrides(tts_url, override):
     browser = browser_path()
@@ -385,6 +431,64 @@ def test_preflight_reads_tts_key_from_dotenv():
         assert "no TTS key" not in r.stderr, r.stderr
 
 
+def _preflight(project, env):
+    return subprocess.run(
+        [sys.executable, "scripts/worker_preflight.py", "cases/a/lesson.json"],
+        cwd=project, env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=120,
+    )
+
+
+def test_preflight_tts_key_follows_provider():
+    """第 3 项按本次 provider 查 key：MiniMax 课要 MINIMAX_API_KEY。
+
+    回归：曾无条件只查 MIMO_API_KEY → 只配了 MINIMAX_API_KEY 的 MiniMax 课
+    被拒之门外，而 MIMO_API_KEY 在、MiniMax key 缺时又放行到渲染才炸。
+    """
+    with tempfile.TemporaryDirectory(prefix="mv_pre_key_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "Provider key narration.", 0.0)
+        sb = project / "cases/a/lesson.json"
+        tpl = json.loads(sb.read_text(encoding="utf-8"))
+        tpl["tts_provider"] = "minimax"
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+
+        base = {
+            k: v for k, v in os.environ.items()
+            if k not in ("MIMO_API_KEY", "MINIMAX_API_KEY")
+        }
+        base["PYTHONUTF8"] = "1"
+
+        # MiniMax 课 + 只有小米 key → 必须点名 MINIMAX_API_KEY，不拿 MIMO 顶替
+        r = _preflight(project, dict(base, MIMO_API_KEY="local-test"))
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "MINIMAX_API_KEY" in r.stderr, r.stderr
+
+        # 反向：只有 MiniMax key → 不再报「缺 TTS key」（浏览器缺失是另一项）
+        r = _preflight(project, dict(base, MINIMAX_API_KEY="local-test"))
+        assert "no TTS key" not in r.stderr, r.stderr
+        assert "MIMO_API_KEY" not in r.stderr, r.stderr
+
+        # 分镜未声明 provider（默认 xiaomi）→ 仍查 MIMO_API_KEY 并点名它
+        tpl.pop("tts_provider")
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+        r = _preflight(project, base)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "MIMO_API_KEY" in r.stderr, r.stderr
+
+        # CLI 覆盖优先于分镜字段：分镜写 xiaomi、CLI 传 minimax → 查 MiniMax key
+        tpl["tts_provider"] = "xiaomi"
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+        r = subprocess.run(
+            [sys.executable, "scripts/worker_preflight.py", "cases/a/lesson.json",
+             "--tts-provider", "minimax"],
+            cwd=project, env=dict(base, MIMO_API_KEY="local-test"), capture_output=True,
+            text=True, encoding="utf-8", timeout=120,
+        )
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "MINIMAX_API_KEY" in r.stderr, r.stderr
+
+
 def test_worker_preview_failure_runs_zero_tts_requests():
     browser = browser_path()
     if not browser:
@@ -420,6 +524,125 @@ def test_worker_tts_failure_reports_render_stage():
         assert r.returncode == 3
         assert "status: FAIL_AT_RENDER" in r.stdout
         assert "make_video.py exit" in r.stdout
+
+
+def test_minimax_storyboard_renders_and_reuses_with_provider_aware_check5(
+    minimax_tts_url,
+):
+    """MiniMax 课的 provider 要贯穿三处：preflight 查 MINIMAX_API_KEY、render 写
+    minimax 指纹缓存、verify 检查 5 用同一 provider 核对（audio_cache v3 指纹含 provider）。
+
+    回归：verify 曾漏传 provider（静默退化成 xiaomi）→ MiniMax 课第一次渲染就
+    必然 FAIL_AT_VERIFY「cache miss」，`--reuse-audio` 在这条链上完全不可用。
+    """
+    browser = browser_path()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    url, counter = minimax_tts_url
+    with tempfile.TemporaryDirectory(prefix="mv_minimax_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "MiniMax narration.", 0.0)
+        sb = project / "cases/a/lesson.json"
+        tpl = json.loads(sb.read_text(encoding="utf-8"))
+        tpl["tts_provider"] = "minimax"
+        sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "MIMO_API_KEY"}
+        env.update(MINIMAX_API_KEY="local-test", MINIMAX_API_URL=url, PYTHONUTF8="1")
+
+        r1 = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert "status: OK" in r1.stdout, r1.stdout
+        assert "generated=6 reused=0" in r1.stdout, r1.stdout
+        assert counter["post"] == 6, counter  # 6 幕各合成一次
+
+        # worker 的 OK 路径只回传摘要行，检查 5 的 provider 明细只在 standalone verify 里可见
+        v = subprocess.run(
+            [
+                sys.executable,
+                "scripts/worker_verify.py",
+                "cases/a/lesson.json",
+                "out/x.mp4",
+                "--expect-reuse-audio",
+            ],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+        )
+        assert v.returncode == 0, v.stdout + v.stderr
+        assert "CHECK 5 PASS" in v.stdout, v.stdout
+        assert "reuse-confirmed provider=minimax" in v.stdout, v.stdout
+
+        # 第二次同分镜同 provider：全命中，零 TTS 请求，检查 5 仍须绿
+        r2 = _run_worker(project, env, "cases/a/lesson.json", "out/x.mp4", "--reuse-audio")
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert "status: OK" in r2.stdout, r2.stdout
+        assert "generated=0 reused=6" in r2.stdout, r2.stdout
+        assert counter["post"] == 6, counter
+
+
+def test_worker_tts_provider_cli_reaches_all_three_stages(minimax_tts_url):
+    """分镜不写 provider、只给 CLI `--tts-provider minimax`：三处透传各自被钉住。
+
+    render_worker 把 provider 分别转发给 preflight（查 key）、make_video（合成/写缓存）、
+    verify（检查 5 核对缓存）。三个分支此前都没有测试，删掉任意一个都能静默通过：
+      · preflight 漏传 → 查 MIMO_API_KEY，env 里没有 → FAIL_AT_PREFLIGHT
+      · make_video 漏传 → 走 xiaomi 默认端点（MIMO_API_URL 未设）→ FAIL_AT_RENDER
+      · verify 漏传 → 拿 xiaomi 指纹查 minimax 缓存 → 假 cache miss → FAIL_AT_VERIFY
+    反向控制：显式不传 `--tts-provider` 时，同一分镜必须按 xiaomi 判失败。
+    """
+    browser = browser_path()
+    if not browser:
+        pytest.skip("no Chrome/Edge available")
+    url, counter = minimax_tts_url
+    with tempfile.TemporaryDirectory(prefix="mv_provider_cli_") as tmp:
+        project = _copy_project(tmp)
+        _write_source_storyboard(project, "a", "CLI provider narration.", 0.0)
+        sb = "cases/a/lesson.json"
+        env = {k: v for k, v in os.environ.items() if k != "MIMO_API_KEY"}
+        env.update(MINIMAX_API_KEY="local-test", MINIMAX_API_URL=url, PYTHONUTF8="1")
+
+        def verify(*extra):
+            return subprocess.run(
+                [sys.executable, "scripts/worker_verify.py", sb, "out/x.mp4", *extra],
+                cwd=project, env=env, capture_output=True, text=True,
+                encoding="utf-8", timeout=120,
+            )
+
+        # 反向控制（1）：不传 CLI provider → preflight 按 xiaomi 查 MIMO_API_KEY → 提前失败
+        r0 = _run_worker(project, env, sb, "out/x.mp4", "--reuse-audio")
+        assert r0.returncode == 1, r0.stdout + r0.stderr
+        assert "status: FAIL_AT_PREFLIGHT" in r0.stdout, r0.stdout
+        assert "MIMO_API_KEY" in r0.stdout, r0.stdout
+        assert counter["post"] == 0, counter  # preflight 失败不花配额
+
+        r1 = _run_worker(project, env, sb, "out/x.mp4",
+                         "--reuse-audio", "--tts-provider", "minimax")
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert "status: OK" in r1.stdout, r1.stdout
+        assert "generated=6 reused=0" in r1.stdout, r1.stdout
+        assert counter["post"] == 6, counter
+
+        # 反向控制（2）：缓存是 minimax 指纹，verify 不传 provider → 检查 5 必须红
+        v0 = verify("--expect-reuse-audio")
+        assert v0.returncode != 0, v0.stdout + v0.stderr
+        assert "CHECK 5 FAIL" in v0.stdout, v0.stdout
+        assert "cache miss scene 0" in v0.stdout, v0.stdout
+
+        v1 = verify("--expect-reuse-audio", "--tts-provider", "minimax")
+        assert v1.returncode == 0, v1.stdout + v1.stderr
+        assert "CHECK 5 PASS" in v1.stdout, v1.stdout
+        assert "reuse-confirmed provider=minimax" in v1.stdout, v1.stdout
+
+        # 第二次同 provider：全命中、零新增请求
+        r2 = _run_worker(project, env, sb, "out/x.mp4",
+                         "--reuse-audio", "--tts-provider", "minimax")
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert "status: OK" in r2.stdout, r2.stdout
+        assert "generated=0 reused=6" in r2.stdout, r2.stdout
+        assert counter["post"] == 6, counter
 
 
 def test_worker_verify_failure_marks_failed_and_unexecuted(tts_url):

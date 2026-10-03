@@ -2,9 +2,12 @@
 
 用法: py scripts/worker_verify.py examples/<slug>.json output/<slug>.mp4
       [--style NAME] [--no-motion] [--expect-reuse-audio]
+      [--tts-provider xiaomi|minimax]
 
 六项定义见 scripts/worker_result.py（单一事实源）。本脚本只评估自己实测的
-3=mp4 存在且时长>0；4=音画锁 ±5%（成片音轨口径）；5=cache 命中（可选）；
+3=mp4 存在且时长>0；4=音画锁 ±5%（成片音轨口径）；5=cache 命中（可选，
+按 (provider, voice, narrate, 解码版本) 指纹核对——provider 与渲染器同源：
+`--tts-provider` > 分镜顶层 `tts_provider` > xiaomi）；
 6=残留字面转义字符拦截。检查 1/2（闸门绿、预览无溢出）是父入口 Step 1/2 的
 职责——单独执行本脚本时没有其可靠运行证据，勾选串如实记 `·`（未执行），
 不声称通过；完整六格由 render_worker 用 Step 1/2 实际结果合成。
@@ -36,6 +39,7 @@ from storyboard_gate import (  # noqa: E402
     resolve_style_name,
     resolve_voice,
 )
+from tts_config import is_provider, resolve_tts_provider  # noqa: E402
 
 # 各检查项终态：{item: (state, detail)}；只记本脚本实测结果，不替前置检查背书
 _results = {}
@@ -95,6 +99,11 @@ def main():
     ap.add_argument(
         "--expect-reuse-audio", action="store_true", help="检查 5：音频 cache 全命中"
     )
+    ap.add_argument(
+        "--tts-provider",
+        default=None,
+        help="渲染时的 TTS 引擎：xiaomi|minimax（优先于分镜顶层 tts_provider；决定检查 5 的缓存指纹）",
+    )
     args = ap.parse_args()
 
     # 检查 3：mp4 存在且时长 > 0（tc.media_duration 走 imageio_ffmpeg，不依赖 ffprobe）
@@ -143,16 +152,32 @@ def main():
     _record(4, wr.PASS, f"drift={drift:+.1%} (exp {expected:.2f}s, {len(wavs)} tracks, {src})")
 
     # 检查 5：cache 命中按指纹核对（raw+meta 都算），不看目录文件数——
-    # 旁白改过会残留旧指纹文件，计数口径误报；meta 不符时 render 会重 TTS（假阳性）
+    # 旁白改过会残留旧指纹文件，计数口径误报；meta 不符时 render 会重 TTS（假阳性）。
+    # provider 必须核实到渲染时的同一家（audio_cache v3 把 provider 并入指纹）：
+    # 漏传 provider 会退化成默认 xiaomi，MiniMax 课去查 xiaomi 指纹路径 → 全套假缺失。
     if args.expect_reuse_audio:
         slug = os.path.splitext(os.path.basename(args.storyboard))[0]
         cache_dir = os.path.join(ROOT, "_build", slug)
+        provider = resolve_tts_provider(
+            storyboard_provider=tpl.get("tts_provider"),
+            cli_provider=args.tts_provider,
+        )
+        if not is_provider(provider):
+            fail(5, f"未知 tts_provider: {provider!r}（应为 xiaomi 或 minimax）")
         for i, sc in enumerate(tpl["scenes"]):
             sc_voice = resolve_voice(sc, tpl)
-            raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice)
-            if not ac.is_hit(raw_path, sc_voice, sc["narrate"]):
-                fail(5, f"cache miss scene {i}: {raw_path}（旁白/音色与缓存不符）")
-        _record(5, wr.PASS, ("reuse-confirmed " + _cache_facts(manifest)).rstrip())
+            raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice, provider)
+            if not ac.is_hit(raw_path, sc_voice, sc["narrate"], provider):
+                fail(
+                    5,
+                    f"cache miss scene {i}: {raw_path}"
+                    f"（provider={provider} 的旁白/音色与缓存不符）",
+                )
+        _record(
+            5,
+            wr.PASS,
+            (f"reuse-confirmed provider={provider} " + _cache_facts(manifest)).rstrip(),
+        )
     else:
         skip = "未要求 --expect-reuse-audio（显式跳过） " + _cache_facts(manifest)
         _record(5, wr.SKIP, skip.rstrip())

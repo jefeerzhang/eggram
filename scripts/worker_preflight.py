@@ -1,19 +1,24 @@
 """worker_preflight.py — render worker Step 1 前置闸门（GitHub issue #11）
 
 用法: py scripts/worker_preflight.py examples/<slug>.json [--browser PATH]
+      [--tts-provider xiaomi|minimax]
 
 四项检查全过 → stdout 打印 PREFLIGHT_OK、exit 0；任一失败 → stderr 文案、exit 1。
 失败分类（FAIL_AT_PREFLIGHT）由 worker wrapper（issue 01）负责，本脚本只短路径失败。
 入口处先 load_env()：TTS key 检查只看 os.environ，必须在它之前把 ROOT/.env 读进来。
+第 3 项按本次 provider 查对应 key（provider = CLI > 分镜顶层 tts_provider > xiaomi）：
+MiniMax 课要的是 MINIMAX_API_KEY，拿 MIMO_API_KEY 顶替只会误报或漏检。
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 
 import toolchain as tc  # 纯 stdlib：只找浏览器，不拉媒体管线
 from storyboard_gate import load_env
+from tts_config import is_provider, minimax_config, resolve_tts_provider
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VALIDATOR = os.path.join(ROOT, "scripts", "validate_storyboard.py")
@@ -31,6 +36,11 @@ def main():
     ap.add_argument("storyboard", help="分镜 JSON 路径")
     ap.add_argument(
         "--browser", default=None, help="浏览器可执行文件路径（透传 toolchain.browser_path）"
+    )
+    ap.add_argument(
+        "--tts-provider",
+        default=None,
+        help="TTS 引擎：xiaomi|minimax（优先于分镜顶层 tts_provider；决定第 3 项查哪个 key）",
     )
     args = ap.parse_args()
 
@@ -51,9 +61,26 @@ def main():
         print("\n".join(tail), file=sys.stderr)
         sys.exit(1)
 
-    # 3. TTS key：只查环境变量，不试连 API（避免误判）
-    if not os.environ.get("MIMO_API_KEY"):
-        fail("no TTS key: 未配置 MIMO_API_KEY（环境变量或 ROOT/.env）")
+    # 3. TTS key：只查环境变量，不试连 API（避免误判）。查哪个 key 由本次 provider
+    #    决定，与 make_video 同源（CLI > 分镜顶层 tts_provider > xiaomi）：
+    #    MiniMax 课缺 MINIMAX_API_KEY 时要在这一步说清，而不是拿 MIMO_API_KEY 顶替。
+    try:
+        with open(args.storyboard, encoding="utf-8") as f:
+            tpl = json.load(f)
+    except (OSError, ValueError):
+        fail(f"分镜 JSON 无法读取: {args.storyboard}")
+    provider = resolve_tts_provider(
+        storyboard_provider=tpl.get("tts_provider"),
+        cli_provider=args.tts_provider,
+    )
+    if not is_provider(provider):
+        fail(f"unknown tts_provider: {provider!r}（应为 xiaomi 或 minimax）")
+    if provider == "minimax":
+        key_env, key = "MINIMAX_API_KEY", minimax_config()["key"]
+    else:
+        key_env, key = "MIMO_API_KEY", os.environ.get("MIMO_API_KEY")
+    if not key:
+        fail(f"no TTS key: provider={provider} 需要 {key_env}（环境变量或 ROOT/.env）")
 
     # 4. 浏览器可发现（时点检查：假设 preflight→render 期间路径不变；
     #    真失效时 make_video exit 3 仍按映射表归 FAIL_AT_PREFLIGHT）
