@@ -9,6 +9,8 @@ body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__
 .card{width:100%;max-width:1000px;margin-top:36px;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:28px;padding:56px 64px;backdrop-filter:blur(4px);box-shadow:0 8px 32px rgba(0,0,0,0.25);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
 .en{font-size:60px;line-height:1.55;font-weight:700;letter-spacing:1px}
 .hl{color:__CORRECT__;font-weight:800}
+.rad{display:inline-block;position:relative;padding-left:.6em;border-top:2.5px solid currentColor}
+.rad::before{content:"√";position:absolute;left:.02em;top:-.04em;font-size:1.05em;line-height:1;transform:scaleY(1.35);transform-origin:top left}
 .err{color:__WRONG__;font-weight:800}
 .zh{margin-top:32px;font-size:__SUB_SIZE__px;color:__INK_SUB__;letter-spacing:1px}
 </style></head><body>

@@ -59,7 +59,8 @@ KIND_REGISTRY = {
         variant_slots={"side": ["__ZH__"], "formula": ["__FORMULA_MAIN__", "__PARTS__"]},
         overflow_selectors=[
             ".title", ".badge", ".sub", ".body", ".formula", ".formula-frac",
-            ".formula-num", ".formula-den", ".step-text", ".example-text", ".hl", ".err",
+            ".formula-num", ".formula-den", ".step-text", ".example-text", ".hl",
+            ".rad", ".err",
         ],
     ),
     "diagram": KindSpec(
@@ -72,7 +73,8 @@ KIND_REGISTRY = {
         variants={},
         variant_slots={},
         overflow_selectors=[
-            ".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".err",
+            ".title", ".badge", ".sub", ".chart-container", ".body", ".hl", ".rad",
+            ".err",
         ],
     ),
     "example": KindSpec(
@@ -85,7 +87,8 @@ KIND_REGISTRY = {
         variants={"side": "layout-example-side.html"},
         variant_slots={"side": ["__WRONG_BODY__"]},
         overflow_selectors=[
-            ".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".err",
+            ".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".rad",
+            ".err",
         ],
     ),
     "mistake": KindSpec(
@@ -97,7 +100,9 @@ KIND_REGISTRY = {
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
         variants={},
         variant_slots={},
-        overflow_selectors=[".title", ".badge", ".sub", ".q", ".why", ".hl", ".err"],
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".q", ".why", ".hl", ".rad", ".err",
+        ],
     ),
     "practice": KindSpec(
         role="understanding_check",
@@ -108,7 +113,9 @@ KIND_REGISTRY = {
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__THINK__"],
         variants={},
         variant_slots={},
-        overflow_selectors=[".title", ".badge", ".sub", ".q", ".think", ".err"],
+        overflow_selectors=[
+            ".title", ".badge", ".sub", ".q", ".think", ".err", ".rad",
+        ],
     ),
     "answer": KindSpec(
         role="check_reveal",
@@ -120,7 +127,8 @@ KIND_REGISTRY = {
         variants={},
         variant_slots={},
         overflow_selectors=[
-            ".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".err",
+            ".title", ".badge", ".sub", ".mark", ".en", ".explain", ".hl", ".rad",
+            ".err",
         ],
     ),
     "summary": KindSpec(
@@ -132,7 +140,7 @@ KIND_REGISTRY = {
         needs=["__BODY__", "__SUB__"],
         variants={},
         variant_slots={},
-        overflow_selectors=[".sum", ".next", ".hl"],
+        overflow_selectors=[".sum", ".next", ".hl", ".rad"],
     ),
 }
 
@@ -510,6 +518,13 @@ _WHITELIST_TAGS = (
         re.compile(r"&lt;sup&gt;(.*?)&lt;/sup&gt;", re.IGNORECASE | re.DOTALL),
         r"<sup>\1</sup>",
     ),
+    (
+        # 根号：草稿里写 <rad>w<sup>T</sup>Σw</rad>，还原成带根号线的 span
+        # （线由 templates/layout-*.html 的 .rad 边框画出；U+221A 单独一个字符
+        # 没有上划线，视觉上读成"√(…)"而不是根式）。
+        re.compile(r"&lt;rad&gt;(.*?)&lt;/rad&gt;", re.IGNORECASE | re.DOTALL),
+        r'<span class="rad">\1</span>',
+    ),
 )
 
 
@@ -517,7 +532,7 @@ def _escape(text):
     """把教学字段当纯文本：& < > \" ' 按字面显示；下划线转为实体以中和 __...__ 槽位 token，
     避免内容被后续槽二次解释或被误判为残留占位符。
     换行处理：JSON 中的 \\n、真实换行、手写 <br> 均统一转为 HTML <br>。
-    白名单标签：<br> / <sub> / <sup> 透传（公式上下标需求），其它 <...> 仍 escape。
+    白名单标签：<br> / <sub> / <sup> / <rad> 透传（公式上下标与根号需求），其它 <...> 仍 escape。
     正文里的 @BR@ 或字面 &lt;sub&gt; 都不会被还原成真标签——还原只认转义后的标签形态。
     """
     s = str(text).replace("\\n", "\n")

@@ -37,6 +37,22 @@
         font-weight: 800;
         letter-spacing: 2px;
       }
+      .rad {
+        display: inline-block;
+        position: relative;
+        padding-left: 0.6em;
+        border-top: 2.5px solid currentColor;
+      }
+      .rad::before {
+        content: "√";
+        position: absolute;
+        left: 0.02em;
+        top: -0.04em;
+        font-size: 1.05em;
+        line-height: 1;
+        transform: scaleY(1.35);
+        transform-origin: top left;
+      }
       .underline {
         width: 96px;
         height: 6px;

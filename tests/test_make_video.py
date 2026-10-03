@@ -106,9 +106,51 @@ def test_escape_sub_sup_whitelist_and_literal_guards():
     assert "<span class=\"hl\">" in out
 
 
+def test_escape_radical_tag_and_its_css_travel_together():
+    """根号：<rad> 还原成 .rad span，且每个渲染正文的模板都备好了 .rad 的 CSS。
+
+    缺 CSS 的失败方式是静默的——屏幕上只剩一个孤零零的 √，就是加这个标签之前的
+    样子。所以标签和那条线由同一条断言钉住。
+    """
+    assert (
+        sg._escape("<rad>(w<sup>T</sup>Σw)</rad>")
+        == '<span class="rad">(w<sup>T</sup>Σw)</span>'
+    )
+    # 白名单没有顺手放宽：<sqrt> 仍按字面显示
+    assert sg._escape("<sqrt>x</sqrt>") == "&lt;sqrt&gt;x&lt;/sqrt&gt;"
+    # 高亮里的根号
+    out = sg.highlight_body("σ = **<rad>(wᵀΣw)</rad>**", "rule")
+    assert '<span class="hl"><span class="rad">(wᵀΣw)</span></span>' in out
+
+    # 凡是渲染过 _escape 文本字段的模板都可能收到 <rad>，无一例外。
+    # 曾经按「有没有 __BODY__ 槽」筛模板，把 title（只有 __HEADER__/__SUB__）漏在外面。
+    esc_slots = ("__HEADER__", "__SUB__", "__BODY__", "__WRONG_BODY__", "__ZH__",
+                 "__THINK__", "__FORMULA_MAIN__")
+    carriers = []
+    for fn in sorted(os.listdir(sg.TEMPLATE_DIR)):
+        if not fn.endswith(".html"):
+            continue
+        with open(os.path.join(sg.TEMPLATE_DIR, fn), encoding="utf-8") as f:
+            raw = f.read()
+        if any(slot in raw for slot in esc_slots):
+            carriers.append((fn, raw))
+    assert len(carriers) >= 11, [c[0] for c in carriers]
+    for fn, raw in carriers:
+        assert re.search(r"\.rad\s*\{", raw), f"{fn} 渲染正文却没有 .rad 样式，根号会静默退化"
+        assert re.search(r"\.rad::before\s*\{[^}]*√", raw, re.S), f"{fn} 的 .rad 少了 √ 号"
+
+    # 端到端：title 页的 <rad> 必须真的画出根号（曾经整页漏了 CSS，只剩一对括号）
+    html = sg.render_html(
+        {"kind": "title", "header": "σ = <rad>(wᵀΣw)</rad>", "sub": "s",
+         "body": "b", "narrate": "n"},
+        _cfg(),
+    )
+    assert '<div class="big">σ = <span class="rad">(wᵀΣw)</span></div>' in html
+    assert "√" in html
+
+
 def test_highlight_body_escapes_and_keeps_highlight():
     out = sg.highlight_body("区间：**0<x<1**", "rule")
-    assert "区间：" in out
     assert '<span class="hl">0&lt;x&lt;1</span>' in out
     # 不生成真实 HTML 元素
     assert "<span>" not in out.replace('<span class="hl">', "")

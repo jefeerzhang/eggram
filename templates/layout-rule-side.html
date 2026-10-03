@@ -11,6 +11,8 @@ body{width:__W__px;height:__H__px;background:linear-gradient(135deg,__BG__ 0%,__
 .col-example{flex:0.9;background:__SURFACE__;border:1px solid __SURFACE_BORDER__;border-radius:22px;padding:28px 32px;box-shadow:0 4px 20px rgba(0,0,0,0.18);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
 .body{font-size:__BODY_SIZE__px;line-height:1.6;font-weight:500;text-align:center}
 .hl{color:__ACCENT__;font-weight:800}
+.rad{display:inline-block;position:relative;padding-left:.6em;border-top:2.5px solid currentColor}
+.rad::before{content:"√";position:absolute;left:.02em;top:-.04em;font-size:1.05em;line-height:1;transform:scaleY(1.35);transform-origin:top left}
 .err{color:__WRONG__;font-weight:800}
 .example-label{font-size:__BADGE_SIZE__px;color:__CORRECT__;border:1px solid __CORRECT__;border-radius:999px;padding:3px 14px;white-space:nowrap}
 .example-text{font-size:calc(__BODY_SIZE__px * 0.85);line-height:1.5;font-weight:600;text-align:center}
