@@ -830,9 +830,11 @@ def test_prepare_storyboard_resolves_variant_and_fallback():
         "layout-example-side.html",
         "layout-rule-side.html",
     }
-    rule["layout_variant"] = "nope"  # 未知变体 → 回退默认
+    rule["layout_variant"] = "nope"  # 未知变体 → 闸门报错（渲染侧仍回退默认布局）
     prep2 = sg.prepare_storyboard(tpl)
-    assert prep2["errors"] == []
+    assert [e for e in prep2["errors"] if "未知 layout_variant" in e] == [
+        "scenes[1]: 未知 layout_variant='nope'（可选: formula, side）"
+    ]
     fallback = next(e for e in prep2["scenes"] if e["variant"] == "nope")
     assert fallback["layout_file"] == "layout-rule.html"
     assert fallback["html"] == sg.render_html(rule, prep2["cfg"])

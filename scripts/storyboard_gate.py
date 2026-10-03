@@ -5,7 +5,8 @@ storyboard_gate.py — 分镜准备与静态闸门（唯一规则源）
 规则顺序与诊断；make_video.py（渲染）与 validate_storyboard.py（独立校验）
 消费同一行为，不留两套规则。
 
-纯准备行为：只依赖标准库与 charts（SVG 字符串），不导入 playwright/ffmpeg/numpy；
+纯准备行为：只依赖标准库、charts（SVG 字符串）与 tts_config（TTS provider 白名单，
+纯 stdlib），不导入 playwright/ffmpeg/numpy；
 缺少浏览器与音频运行依赖的环境也可完成静态分镜与页面校验。浏览器发现、TTS、
 编码等运行环境初始化归各 CLI 自身。
 
@@ -20,6 +21,7 @@ import re
 from collections import namedtuple
 
 from charts import resolve_chart, svg_escape
+from tts_config import is_provider
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(ROOT, "templates")
@@ -43,10 +45,10 @@ KIND_REGISTRY = {
         badge="",
         motion="zoom_in",
         arc_phase=0,
-        needs=["__HEADER__"],
+        needs=["__HEADER__", "__BODY__"],
         variants={},
         variant_slots={},
-        overflow_selectors=[".big", ".sub"],
+        overflow_selectors=[".big", ".body", ".sub", ".rad"],
     ),
     "rule": KindSpec(
         role="concept_anchor",
@@ -151,6 +153,27 @@ LAYOUT_VARIANT_SLOTS = {
     (k, v): list(slots)
     for k, s in KIND_REGISTRY.items()
     for v, slots in s.variant_slots.items()
+}
+
+# 变体额外槽位 → 「分镜必须提供内容」的判据。槽位表只保证模板侧有槽，分镜侧此前
+# 只有 example+side 的 wrong_body 被检查：rule+side 的 __ZH__ 空着也能上成片。
+# __WRONG_BODY__ 不进这张表，由 validate_storyboard 的 example+side 分支专门报错
+# （那边还要额外查样式泄漏，重复报错会更吵）。
+_VARIANT_SLOT_CONTENT = {
+    "__ZH__": (
+        lambda sc: bool(_text(sc.get("zh")).strip() or _text(sc.get("sub")).strip()),
+        "请提供 zh 或 sub 作为中文侧栏",
+    ),
+    "__FORMULA_MAIN__": (
+        lambda sc: isinstance(sc.get("formula"), dict)
+        or bool(_text(sc.get("body")).strip()),
+        "请提供 formula 对象（或非空 body 走旧版两步展示）",
+    ),
+    "__PARTS__": (
+        lambda sc: isinstance(sc.get("formula"), dict)
+        or bool(_text(sc.get("body")).strip()),
+        "请提供 formula.parts（或非空 body 走旧版两步展示）",
+    ),
 }
 KIND_BADGE = {k: s.badge for k, s in KIND_REGISTRY.items()}
 KIND_MOTION = {k: s.motion for k, s in KIND_REGISTRY.items()}
@@ -542,6 +565,21 @@ def _escape(text):
     return s
 
 
+def _text(value):
+    """教学字段一律按文本取用：None → ""，非字符串（int/dict/list）→ str()。
+
+    两件事都必要：
+    - `sc.get(k, "")` 只在**键缺失**时给默认值，显式写 `null` 会原样传进来，而
+      `_escape`/`highlight_body` 内部是 `str(...)`，于是画面上出现字面 "None"；
+    - `(v or "").strip()` 对 int/dict 抛 AttributeError，整个 CLI 以 traceback 结束
+      （闸门本该报「字段类型不对」）。
+    类型是否合法由 validate_storyboard 判；这里只保证渲染不崩、不把 None 印上屏。
+    """
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
 def highlight_body(body, kind):
     hl_cls = "err" if kind in ("practice", "mistake") else "hl"
     # 1. [name] token 提取为占位符（避免被 _escape 转义）
@@ -735,7 +773,10 @@ def build_formula_parts_html(parts, *, legacy_zh="", badge=""):
         items = parts
     chunks = ['<div class="breakdown">']
     for i, p in enumerate(items):
-        pid = _escape(str(p.get("id") or f"p{i}"))
+        # 属性值上下文：必须用 svg_escape（< → &lt;、" → &quot; 由解析器还原回原值）。
+        # 曾经误用 _escape（文本上下文），其白名单还原串 '<span class="rad">' 里的
+        # 引号会提前闭合属性，前端 findIndex 失配 → 该页所有 .step 永久停在暗态。
+        pid = svg_escape(str(p.get("id") or f"p{i}"))
         label = _escape(str(p.get("label") or str(i + 1)))
         text = highlight_body(p.get("text") or "", "rule")
         chunks.append(
@@ -782,8 +823,8 @@ def render_html(sc, cfg):
         html = html.replace("</head>", MOTION_CSS + "</head>", 1)
     else:
         html = MOTION_CSS + html
-    body_html = highlight_body(sc.get("body", ""), kind)
-    zh = sc.get("zh", sc.get("sub", ""))
+    body_html = highlight_body(_text(sc.get("body")), kind)
+    zh = _text(sc.get("zh")) or _text(sc.get("sub"))
     formula = sc.get("formula") if isinstance(sc.get("formula"), dict) else None
     use_formula = kind == "rule" and layout_variant == "formula"
     if use_formula and formula is not None:
@@ -816,14 +857,14 @@ def render_html(sc, cfg):
     slots = {
         "__W__": str(W),
         "__H__": str(H),
-        "__HEADER__": _escape(sc.get("header", "")),
+        "__HEADER__": _escape(_text(sc.get("header"))),
         "__BADGE__": KIND_BADGE.get(kind, ""),
-        "__SUB__": _escape(sc.get("sub", "")),
+        "__SUB__": _escape(_text(sc.get("sub"))),
         "__ZH__": _escape(zh),
         "__BODY__": body_html,
         "__FORMULA_MAIN__": formula_main,
         "__PARTS__": parts_html,
-        "__WRONG_BODY__": highlight_body(sc.get("wrong_body", ""), "mistake"),
+        "__WRONG_BODY__": highlight_body(_text(sc.get("wrong_body")), "mistake"),
         "__CHART__": chart_html,
         "__CHART_MOTION__": (
             "chart-animated"
@@ -881,18 +922,39 @@ def _check_layout_file(fn, raw, need, errors):
             errors.append(f"{fn}: 缺少风格槽 {slot}（须由 style-*.json 注入）")
 
 
+def _read_template(path, fn, errors):
+    """读模板文件；缺失/不可读记成闸门错误并返回 None（不再抛裸 FileNotFoundError）。
+
+    模板缺失时 prepare_storyboard 会以 exit 1 的 traceback 结束，而调用方按 exit 2
+    判「分镜有错」——模板问题被误报成分镜问题，且崩的是加载而不是校验。
+    """
+    if not os.path.isfile(path):
+        errors.append(f"{fn}: 缺失模板文件")
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        errors.append(f"{fn}: 无法读取模板 ({e})")
+        return None
+
+
 def validate_layouts():
     """模板契约：默认布局 + 已存在的排版变体（缺失变体回退默认，不报错）。"""
     errors = []
     for kind, fn in LAYOUT_FILES.items():
-        raw = open(os.path.join(TEMPLATE_DIR, fn), encoding="utf-8").read()
+        raw = _read_template(os.path.join(TEMPLATE_DIR, fn), fn, errors)
+        if raw is None:
+            continue
         _check_layout_file(fn, raw, _layout_needs(kind), errors)
     for kind, variants in LAYOUT_VARIANTS.items():
         for variant, vfn in variants.items():
             path = os.path.join(TEMPLATE_DIR, vfn)
             if not os.path.isfile(path):
                 continue
-            raw = open(path, encoding="utf-8").read()
+            raw = _read_template(path, vfn, errors)
+            if raw is None:
+                continue
             need = _layout_needs(kind) + LAYOUT_VARIANT_SLOTS.get((kind, variant), [])
             if (kind, variant) == ("rule", "formula"):
                 need = [s for s in need if s != "__BODY__"]
@@ -909,13 +971,13 @@ def validate_formula_field(sc, prefix):
         return errors, warnings
     num = formula.get("num")
     den = formula.get("den")
-    display = (formula.get("display") or "").strip()
-    has_frac = bool((num or "").strip() and (den or "").strip())
+    display = _text(formula.get("display")).strip()
+    has_frac = bool(_text(num).strip() and _text(den).strip())
     if not has_frac and not display:
         errors.append(
             f"{prefix}: formula 须提供 num+den，或非空 display"
         )
-    body = (sc.get("body") or "").strip()
+    body = _text(sc.get("body")).strip()
     if body:
         warnings.append(
             f"{prefix}: 已提供 formula，body 将被忽略（以 formula 为准）"
@@ -946,27 +1008,43 @@ def validate_formula_field(sc, prefix):
 def validate_storyboard(tpl):
     """返回 (errors, warnings)。errors 非空 → 闸门失败；warnings 仅打印。"""
     errors, warnings = [], []
+    if not isinstance(tpl, dict):
+        return [f"分镜顶层须为 JSON 对象（当前 {type(tpl).__name__}）"], warnings
     voice = tpl.get("voice")
     if voice is not None and voice not in VOICE_WHITELIST:
         warnings.append(
             f"voice={voice!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
         )
     voices_map = tpl.get("voices", {})
+    if not isinstance(voices_map, dict):
+        errors.append(f"voices 须为对象（角色→音色），当前 {type(voices_map).__name__}")
+        voices_map = {}
     for role_id, vname in voices_map.items():
         if vname not in VOICE_WHITELIST:
             warnings.append(
                 f"voices.{role_id}={vname!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
             )
-    fps, fps_err = parse_positive_px(tpl.get("fps", 30), 30, "fps")
+    provider = tpl.get("tts_provider")
+    if provider is not None and not is_provider(provider):
+        errors.append(
+            f"tts_provider={provider!r} 未知（可选: xiaomi / minimax）"
+        )
+    fps, fps_err = parse_positive_px(tpl.get("fps", 30), 30, "fps", maximum=120)
     if fps_err:
         errors.append(fps_err)
-    scenes = tpl.get("scenes") or []
-    if not scenes:
+    scenes = tpl.get("scenes")
+    if scenes is None or scenes == "" or scenes == []:
         errors.append("scenes 为空")
+        return errors, warnings
+    if not isinstance(scenes, list):
+        errors.append(f"scenes 须为数组（当前 {type(scenes).__name__}）")
         return errors, warnings
     kinds_seen = []
     for i, sc in enumerate(scenes):
         prefix = f"scenes[{i}]"
+        if not isinstance(sc, dict):
+            errors.append(f"{prefix}: 须为对象（当前 {type(sc).__name__}）")
+            continue
         try:
             kind = resolve_kind(sc)
         except ValueError as e:
@@ -977,7 +1055,26 @@ def validate_storyboard(tpl):
             continue
         kinds_seen.append(kind)
         role = sc.get("role") or KIND_TO_ROLE.get(kind, "")
+        if role is not None and not isinstance(role, str):
+            errors.append(f"{prefix}: role 须为字符串（当前 {type(role).__name__}）")
+            role = KIND_TO_ROLE.get(kind, "")
         variant = sc.get("layout_variant")
+        if variant is not None and not isinstance(variant, str):
+            errors.append(
+                f"{prefix}: layout_variant 须为字符串（当前 {type(variant).__name__}）"
+            )
+            variant = None
+        elif variant is not None and variant not in LAYOUT_VARIANTS.get(kind, {}):
+            errors.append(
+                f"{prefix}: 未知 layout_variant={variant!r}（可选: "
+                f"{', '.join(sorted(LAYOUT_VARIANTS.get(kind, {}))) or '本 kind 无变体'}）"
+            )
+        for slot in LAYOUT_VARIANT_SLOTS.get((kind, variant), []):
+            check = _VARIANT_SLOT_CONTENT.get(slot)
+            if check and not check[0](sc):
+                errors.append(
+                    f"{prefix}: layout_variant={variant} 的 {slot} 无内容（{check[1]}）"
+                )
         if sc.get("formula") is not None:
             if kind != "rule" or variant != "formula":
                 warnings.append(
@@ -996,17 +1093,27 @@ def validate_storyboard(tpl):
         if not formula_ok:
             required = ["header", "body", "narrate"]
         for field in required:
-            val = (sc.get(field) or "").strip()
+            fval = sc.get(field)
+            if fval is not None and not isinstance(fval, str):
+                errors.append(
+                    f"{prefix}: {field} 须为字符串（当前 {type(fval).__name__}）"
+                )
+            val = _text(fval).strip()
             if not val:
                 errors.append(f"{prefix}: {field} 不能为空")
             elif LEAK_RE.match(val):
                 errors.append(
                     f"{prefix}: {field}={val!r} 像样式泄漏（色值/字号），不是教学内容"
                 )
-        sub = (sc.get("sub") or "").strip()
+        sub_raw = sc.get("sub")
+        if sub_raw is not None and not isinstance(sub_raw, str):
+            errors.append(
+                f"{prefix}: sub 须为字符串（当前 {type(sub_raw).__name__}）"
+            )
+        sub = _text(sub_raw).strip()
         if sub and LEAK_RE.match(sub):
             errors.append(f"{prefix}: sub={sub!r} 像样式泄漏")
-        if kind == "example" and sc.get("layout_variant") == "side":
+        if kind == "example" and variant == "side":
             wrong_body = sc.get("wrong_body")
             if not isinstance(wrong_body, str) or not wrong_body.strip():
                 errors.append(
@@ -1052,10 +1159,20 @@ def validate_storyboard(tpl):
                         errors.append(
                             f"{prefix}: motion[{idx}] type={mt!r} 非法（{', '.join(MOTIONS)}）"
                         )
+                    if isinstance(item, dict):
+                        delay_v, delay_err = parse_seconds(
+                            item.get("delay", 0), f"motion[{idx}].delay"
+                        )
+                        if delay_err:
+                            errors.append(f"{prefix}: {delay_err}")
+                        elif delay_v < 0:
+                            errors.append(
+                                f"{prefix}: motion[{idx}].delay={delay_v} 不得为负"
+                            )
             else:
                 errors.append(f"{prefix}: motion 格式错误（应为字符串或数组）")
         if kind == "mistake":
-            if "**" not in sc.get("body", ""):
+            if "**" not in _text(sc.get("body")):
                 errors.append(
                     f"{prefix}: mistake（common_mistake）的 body 须用 ** 标出错误点"
                 )
@@ -1063,12 +1180,16 @@ def validate_storyboard(tpl):
                 errors.append(f"{prefix}: mistake 须有 sub/zh 说明「为什么容易错」")
         hold_v, hold_err = None, None
         if "hold" in sc:
-            hold_v, hold_err = parse_seconds(sc.get("hold"))
+            hold_v, hold_err = parse_seconds(sc.get("hold"), maximum=600.0)
             if hold_err:
                 errors.append(f"{prefix}: {hold_err}")
             elif hold_v < 0:
                 hold_err = f"hold={hold_v} 不得为负"
                 errors.append(f"{prefix}: {hold_err}")
+            elif hold_v > 120.0:
+                warnings.append(
+                    f"{prefix}: hold={hold_v}s 偏长（>120s 的静默停顿），确认是否为教学意图"
+                )
         if kind == "practice":
             if "hold" not in sc:
                 hold_v = 0.0  # 缺 hold 的 practice 按 0 处理，下面报下限
@@ -1077,11 +1198,11 @@ def validate_storyboard(tpl):
                     f"{prefix}: practice hold>=5.0（当前 {hold_v}，"
                     f"docs/teaching-method.md）"
                 )
-            if "**" not in sc.get("body", ""):
+            if "**" not in _text(sc.get("body")):
                 errors.append(
                     f"{prefix}: practice（understanding_check）的 body 须用 ** 标出待判断点"
                 )
-            narr = sc.get("narrate") or ""
+            narr = _text(sc.get("narrate"))
             if _PRACTICE_THINK_ALOUD_RE.search(narr):
                 errors.append(
                     f"{prefix}: practice 旁白禁止口播思考计时"
@@ -1089,11 +1210,20 @@ def validate_storyboard(tpl):
                     f"停顿只靠 hold，提示只写 think 字段"
                 )
         if kind == "answer":
-            if "**" not in sc.get("body", ""):
+            if "**" not in _text(sc.get("body")):
                 errors.append(
                     f"{prefix}: answer（check_reveal）的 body 须用 ** 标出正确知识点"
                 )
-        if role and role in ROLE_TO_KIND and ROLE_TO_KIND[role] != kind:
+        if role and role not in ROLE_TO_KIND:
+            # role 是「没有 kind 时用来映射 kind」的别名（docs/teaching-method.md:12）。
+            # 写了 kind 时 role 只是说明性标签，examples/rational_actor.json 就用了
+            # topic_intro / mechanism 这类更细的教学标签 → 只警告不判错（但不再静默）。
+            warnings.append(
+                f"{prefix}: role={role!r} 不是 page-role"
+                f"（可选: {', '.join(sorted(ROLE_TO_KIND))}）；"
+                f"本页已写 kind，role 仅作说明性标签"
+            )
+        elif role and ROLE_TO_KIND[role] != kind:
             errors.append(f"{prefix}: role={role} 与 kind={kind} 不一致")
 
     required = ["title", "rule", "example", "practice", "answer", "summary"]
@@ -1170,11 +1300,12 @@ def validate_rendered_html(html, scene_index):
 _CLIP_EXEMPT_SELECTORS = {".chart-container"}
 
 
-def parse_seconds(value, name="hold"):
-    """把 hold 收成有限秒数，返回 (秒数, 错误文案)。
+def parse_seconds(value, name="hold", maximum=None):
+    """把 hold / motion delay 收成有限秒数，返回 (秒数, 错误文案)。
 
     与 parse_positive_px 同一协议：无法解析时返回 (None, 文案) 由闸门汇总，不抛异常。
     「缺省」由调用方的 `.get(key, 0)` 表达；显式 null / 空串视为非法输入（不是缺省）。
+    maximum 非 None 时带上界（hold 没有上界会静默产出几千万采样点的音轨）。
     """
     if isinstance(value, bool) or value is None or value == "":
         return None, f"{name}={value!r} 须为有限数字"
@@ -1184,18 +1315,23 @@ def parse_seconds(value, name="hold"):
         except ValueError:
             return None, f"{name}={value!r} 须为有限数字"
     if isinstance(value, (int, float)) and math.isfinite(value):
+        if maximum is not None and value > maximum:
+            return None, f"{name}={value} 超过上限 {maximum}"
         return float(value), None
     return None, f"{name}={value!r} 须为有限数字"
 
 
-def parse_positive_px(value, default, name):
+def parse_positive_px(value, default, name, maximum=None):
     """宽高 / fps 须为正整数，返回 (值, 错误文案)。
 
     与 parse_seconds 同一协议；缺省由调用方的 `.get(key, default)` 表达。显式 null /
     空串与 bool / 非 int / ≤0 一样报错——同一类输入不能两种待遇。
+    maximum 非 None 时带上界（fps=100000 会让渲染器截出天量帧）。
     """
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return default, f"{name} 须为正整数（当前 {value!r}）；缺省 {default}"
+    if maximum is not None and value > maximum:
+        return default, f"{name}={value} 超过上限 {maximum}；缺省 {default}"
     return value, None
 
 
@@ -1371,8 +1507,8 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
             ),
             "scenes": [],
         }
-    W, werr = parse_positive_px(tpl.get("width", 1280), 1280, "width")
-    H, herr = parse_positive_px(tpl.get("height", 720), 720, "height")
+    W, werr = parse_positive_px(tpl.get("width", 1280), 1280, "width", maximum=3840)
+    H, herr = parse_positive_px(tpl.get("height", 720), 720, "height", maximum=3840)
     if werr:
         errors.append(werr)
     if herr:

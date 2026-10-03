@@ -11,7 +11,7 @@
 
 | role | kind | 义务 |
 | --- | --- | --- |
-| `learning_objective` | `title` | header=知识点；sub=英文名/公式/一句话目标 |
+| `learning_objective` | `title` | header=知识点；sub=英文名/公式/一句话目标；body=一句钩子（渲染在 sub 下方） |
 | `concept_anchor` | `rule` | body 用 `**` 标结构/变形；单概念 |
 | `worked_demo` | `example` | 英文句 + `**`；sub/zh=中文义 |
 | `common_mistake` | `mistake` | 错误写法 + `**` 错点；sub/zh=诱因 |

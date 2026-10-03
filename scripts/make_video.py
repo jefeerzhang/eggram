@@ -558,6 +558,7 @@ def main():
                 print("VALIDATION FAILED mid-render:", left)
                 sys.exit(wr.MV_EXIT_VALIDATION)
             page.set_content(html)
+            settle_css_animations(page)
             motion = resolve_motion(sc, motion_enabled)
             fparts = formula_parts_for_motion(sc)
             n_frames = frame_counts[i]
@@ -568,7 +569,7 @@ def main():
                     formula_motion_vars(fparts, 1.0, 1.0) if fparts is not None else None
                 )
                 apply_motion_css_vars(page, motion_vars(motion, 0.0, 1.0), fvars)
-                shot = page.screenshot(type="png")
+                shot = page.screenshot(type="png", animations="disabled")
                 for _ in range(n_frames):
                     ff_stdin.write(shot)
                     gi += 1
@@ -588,7 +589,7 @@ def main():
                         frame_motion_state(motion, k, FPS, narr_frames),
                         fvars,
                     )
-                    ff_stdin.write(page.screenshot(type="png"))
+                    ff_stdin.write(page.screenshot(type="png", animations="disabled"))
                     gi += 1
         b.close()
     ff_stdin.close()
@@ -634,6 +635,21 @@ def main():
 
 
 # ---- 音频缓存与工具定位：契约分别在 audio_cache / toolchain（纯 stdlib）----
+
+
+def settle_css_animations(page):
+    """把页面里的 CSS 动画推进到终态（壁钟驱动 → 帧内容可复现）。
+
+    diagram 布局的揭示动画由浏览器 wall-clock 的 CSS keyframe 驱动
+    （templates/layout-diagram.html 的 pathDraw / staggerIn / glowPulse；charts.py 只写
+    animation-delay），与帧序号无关：同一分镜两次渲染会因机器快慢截到不同进度，预览
+    缩略图会截到半透明中间态，溢出探测读到的还是 translateY/scale 中间盒子。
+    一次性 finish() 后 `forwards` 填充让它们停在终态，渲染与时钟解耦。
+    """
+    page.evaluate(
+        "() => { for (const a of document.getAnimations())"
+        " { try { a.finish(); } catch (e) { a.cancel(); } } }"
+    )
 
 
 def preview_reuse_errors(preview_dir, scenes, storyboard_fp, templates_fp=None):
@@ -694,13 +710,16 @@ def run_preview(tpl_path, cfg, scenes, browser, preview_dir):
             html = render_html(sc, cfg)
             ph_errs = validate_rendered_html(html, i)
             page.set_content(html)
+            settle_css_animations(page)
             kind = resolve_kind(sc)
             motion = resolve_motion(sc, cfg.motion_enabled)
             # 缩略图取 t=0（起点画面），避免截到中间态
             apply_motion_css_vars(page, motion_vars(motion, 0.0, 1.0))
             png = os.path.join(out_dir, f"s{i}.png")
             # 原子落位：并行同配置运行写同一路径时读方只见完整文件（#22）
-            ra.atomic_write_bytes(png, page.screenshot(type="png", full_page=False))
+            ra.atomic_write_bytes(
+                png, page.screenshot(type="png", full_page=False, animations="disabled")
+            )
             # 溢出探测覆盖动效可达状态：none 只测静态；其余按各动效自身窗口采样 0..1
             seen, findings = set(), []
             for elapsed, duration in _motion_probe_states(motion):
