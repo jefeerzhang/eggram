@@ -115,6 +115,7 @@ def test_worker_accepts_preview_configuration_overrides(tts_url, override):
         shutil.copytree(ROOT / "templates", project / "templates")
         tpl = {
             "title": "Worker", "voice": "mimo_default", "fps": 2,
+            "tts_provider": "xiaomi",  # 钉住小米，配 tts_url 的 stand-in
             "scenes": [
                 {"kind": kind, "header": "H", "body": "**B**", "narrate": "N"}
                 for kind in ("title", "rule", "example", "practice", "answer", "summary")
@@ -167,6 +168,7 @@ def test_rendered_delayed_zoom_uses_video_seconds_and_freezes_during_hold(tts_ur
         ), encoding="utf-8")
         tpl = {
             "title": "Timing", "voice": "mimo_default", "fps": 2,
+            "tts_provider": "xiaomi",  # 钉住小米，配 tts_url 的 stand-in
             "scenes": [
                 {"kind": kind, "header": "H", "body": "**B**", "narrate": "N", "motion": "none"}
                 for kind in ("title", "rule", "example", "practice", "answer", "summary")
@@ -213,8 +215,13 @@ def _copy_project(tmp):
     return project
 
 
-def _write_source_storyboard(project, sub, narrate, hold=0.0):
-    """完整教学弧（闸门要求 6 个必要 kind）；变量 hold 放 scene 0（title）。"""
+def _write_source_storyboard(project, sub, narrate, hold=0.0, provider="xiaomi"):
+    """完整教学弧（闸门要求 6 个必要 kind）；变量 hold 放 scene 0（title）。
+
+    provider 显式钉住本次课的 TTS 引擎，缺省 xiaomi 以匹配 tts_url fixture 的
+    小米形状 stand-in（全局默认是 minimax，不写就打到真 MiniMax 去）；传 None
+    则不写顶层字段，专供验证「默认 provider」路径的用例。
+    """
     d = project / "cases" / sub
     d.mkdir(parents=True, exist_ok=True)
     tpl = {
@@ -224,6 +231,8 @@ def _write_source_storyboard(project, sub, narrate, hold=0.0):
             for kind in ("title", "rule", "example", "practice", "answer", "summary")
         ],
     }
+    if provider is not None:
+        tpl["tts_provider"] = provider
     tpl["scenes"][0]["hold"] = hold
     tpl["scenes"][3]["hold"] = 5.0  # practice 闸门要求 hold >= 5.0
     (d / "lesson.json").write_text(json.dumps(tpl), encoding="utf-8")
@@ -469,12 +478,12 @@ def test_preflight_tts_key_follows_provider():
         assert "no TTS key" not in r.stderr, r.stderr
         assert "MIMO_API_KEY" not in r.stderr, r.stderr
 
-        # 分镜未声明 provider（默认 xiaomi）→ 仍查 MIMO_API_KEY 并点名它
+        # 分镜未声明 provider（默认 minimax）→ 查 MINIMAX_API_KEY 并点名它
         tpl.pop("tts_provider")
         sb.write_text(json.dumps(tpl, ensure_ascii=False), encoding="utf-8")
         r = _preflight(project, base)
         assert r.returncode == 1, r.stdout + r.stderr
-        assert "MIMO_API_KEY" in r.stderr, r.stderr
+        assert "MINIMAX_API_KEY" in r.stderr, r.stderr
 
         # CLI 覆盖优先于分镜字段：分镜写 xiaomi、CLI 传 minimax → 查 MiniMax key
         tpl["tts_provider"] = "xiaomi"
@@ -584,14 +593,14 @@ def test_minimax_storyboard_renders_and_reuses_with_provider_aware_check5(
 
 
 def test_worker_tts_provider_cli_reaches_all_three_stages(minimax_tts_url):
-    """分镜不写 provider、只给 CLI `--tts-provider minimax`：三处透传各自被钉住。
+    """分镜不写 provider：默认走 minimax，CLI `--tts-provider` 三处透传各自被钉住。
 
     render_worker 把 provider 分别转发给 preflight（查 key）、make_video（合成/写缓存）、
     verify（检查 5 核对缓存）。三个分支此前都没有测试，删掉任意一个都能静默通过：
-      · preflight 漏传 → 查 MIMO_API_KEY，env 里没有 → FAIL_AT_PREFLIGHT
-      · make_video 漏传 → 走 xiaomi 默认端点（MIMO_API_URL 未设）→ FAIL_AT_RENDER
-      · verify 漏传 → 拿 xiaomi 指纹查 minimax 缓存 → 假 cache miss → FAIL_AT_VERIFY
-    反向控制：显式不传 `--tts-provider` 时，同一分镜必须按 xiaomi 判失败。
+      · preflight 漏传 → 按默认 minimax 查 key，CLI 传的 xiaomi 无人认领
+      · make_video 漏传 → 同上，缓存写进 minimax 指纹路径
+      · verify 漏传 → 拿 minimax 指纹查 xiaomi 缓存 → 假 cache miss → FAIL_AT_VERIFY
+    反向控制：CLI 显式传 xiaomi 时，env 里没有 MIMO_API_KEY，必须提前失败。
     """
     browser = browser_path()
     if not browser:
@@ -599,7 +608,8 @@ def test_worker_tts_provider_cli_reaches_all_three_stages(minimax_tts_url):
     url, counter = minimax_tts_url
     with tempfile.TemporaryDirectory(prefix="mv_provider_cli_") as tmp:
         project = _copy_project(tmp)
-        _write_source_storyboard(project, "a", "CLI provider narration.", 0.0)
+        # provider=None：分镜不写顶层字段，走全局默认 minimax
+        _write_source_storyboard(project, "a", "CLI provider narration.", 0.0, provider=None)
         sb = "cases/a/lesson.json"
         env = {k: v for k, v in os.environ.items() if k != "MIMO_API_KEY"}
         env.update(MINIMAX_API_KEY="local-test", MINIMAX_API_URL=url, PYTHONUTF8="1")
@@ -611,34 +621,34 @@ def test_worker_tts_provider_cli_reaches_all_three_stages(minimax_tts_url):
                 encoding="utf-8", timeout=120,
             )
 
-        # 反向控制（1）：不传 CLI provider → preflight 按 xiaomi 查 MIMO_API_KEY → 提前失败
-        r0 = _run_worker(project, env, sb, "out/x.mp4", "--reuse-audio")
+        # 反向控制（1）：CLI 显式传 xiaomi → preflight 查 MIMO_API_KEY → 提前失败
+        r0 = _run_worker(project, env, sb, "out/x.mp4",
+                         "--reuse-audio", "--tts-provider", "xiaomi")
         assert r0.returncode == 1, r0.stdout + r0.stderr
         assert "status: FAIL_AT_PREFLIGHT" in r0.stdout, r0.stdout
         assert "MIMO_API_KEY" in r0.stdout, r0.stdout
         assert counter["post"] == 0, counter  # preflight 失败不花配额
 
-        r1 = _run_worker(project, env, sb, "out/x.mp4",
-                         "--reuse-audio", "--tts-provider", "minimax")
+        # 不传 provider → 默认 minimax，六页全部生成
+        r1 = _run_worker(project, env, sb, "out/x.mp4", "--reuse-audio")
         assert r1.returncode == 0, r1.stdout + r1.stderr
         assert "status: OK" in r1.stdout, r1.stdout
         assert "generated=6 reused=0" in r1.stdout, r1.stdout
         assert counter["post"] == 6, counter
 
-        # 反向控制（2）：缓存是 minimax 指纹，verify 不传 provider → 检查 5 必须红
-        v0 = verify("--expect-reuse-audio")
+        # 反向控制（2）：缓存是 minimax 指纹，verify 传 xiaomi → 检查 5 必须红
+        v0 = verify("--expect-reuse-audio", "--tts-provider", "xiaomi")
         assert v0.returncode != 0, v0.stdout + v0.stderr
         assert "CHECK 5 FAIL" in v0.stdout, v0.stdout
         assert "cache miss scene 0" in v0.stdout, v0.stdout
 
-        v1 = verify("--expect-reuse-audio", "--tts-provider", "minimax")
+        v1 = verify("--expect-reuse-audio")
         assert v1.returncode == 0, v1.stdout + v1.stderr
         assert "CHECK 5 PASS" in v1.stdout, v1.stdout
         assert "reuse-confirmed provider=minimax" in v1.stdout, v1.stdout
 
         # 第二次同 provider：全命中、零新增请求
-        r2 = _run_worker(project, env, sb, "out/x.mp4",
-                         "--reuse-audio", "--tts-provider", "minimax")
+        r2 = _run_worker(project, env, sb, "out/x.mp4", "--reuse-audio")
         assert r2.returncode == 0, r2.stdout + r2.stderr
         assert "status: OK" in r2.stdout, r2.stdout
         assert "generated=0 reused=6" in r2.stdout, r2.stdout

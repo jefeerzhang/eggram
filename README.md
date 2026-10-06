@@ -37,7 +37,10 @@
 
 - Python 3.11+（依赖 playwright、imageio_ffmpeg、numpy）；Windows 用 `py` 启动器（`python` 在 WindowsApps 桩上静默 exit 49、零输出），macOS/Linux 用 `python3`
 - 本机 Chrome / Edge（自动发现；也可用 `--browser <路径>` 或环境变量 `BROWSER_PATH`/`CHROME_PATH` 显式指定）
-- 环境变量 `MIMO_API_KEY`（可选 `MIMO_API_URL`），用于 TTS 配音
+- TTS 配音三选一，按 provider 取 key（`--tts-provider` 或分镜顶层 `tts_provider`，CLI 优先；都不给则用默认 `minimax`）：
+  - `minimax`（默认）：`MINIMAX_API_KEY`（可选 `MINIMAX_MODEL`）
+  - `xiaomi`：`MIMO_API_KEY`（可选 `MIMO_API_URL`）
+  - `qwen`（阿里云百炼）：`DASHSCOPE_API_KEY`，**须用华北2（北京）地域的 Key**（可选 `QWEN_TTS_MODEL`）
 
 ### 写分镜
 

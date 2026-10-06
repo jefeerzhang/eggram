@@ -54,6 +54,7 @@ from storyboard_gate import (
     resolve_voice,
     validate_rendered_html,
 )
+from tts_config import DEFAULT_PROVIDER, PROVIDERS  # noqa: E402  TTS provider 单一事实源
 
 # 集中配置初始化：可选加载 ROOT/.env（显式环境变量优先），先于 MI 配置读取
 load_env()
@@ -152,8 +153,47 @@ def minimax_tts(text, voice):
     return _mp3_bytes_to_wav_bytes(mp3_bytes, target_rate=SAMPLE_RATE)
 
 
+def qwen_tts(text, voice):
+    """Qwen-Audio-TTS 同步语音合成(阿里云百炼 DashScope)。
+
+    返回值与 mi_tts / minimax_tts 契约一致:单声道 16-bit wav bytes(24kHz)。
+    冒烟核实:带 sample_rate=24000 + format=wav 请求时接口直出单声道 16bit
+    wav,无需 ffmpeg 转码;但其 WAV 头 nframes 为占位值,故时长一律以实际
+    读到的 PCM 为准(见 decode_wav),不得用 getnframes() 估算。
+    """
+    from tts_config import qwen_config, resolve_qwen_voice
+
+    cfg = qwen_config()
+    if not cfg["key"]:
+        raise RuntimeError("未设置环境变量 DASHSCOPE_API_KEY（Qwen TTS）")
+    payload = {
+        "model": cfg["model"],
+        "input": {
+            "text": text,
+            "voice": resolve_qwen_voice(voice),
+            "format": "wav",
+            "sample_rate": SAMPLE_RATE,
+        },
+    }
+    req = urllib.request.Request(
+        cfg["url"], data=json.dumps(payload).encode("utf-8"), method="POST"
+    )
+    req.add_header("Authorization", "Bearer " + cfg["key"])
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        js = json.loads(r.read().decode("utf-8"))
+    audio_url = (js.get("output") or {}).get("audio", {}).get("url")
+    if not audio_url:
+        raise RuntimeError(f"Qwen TTS 响应缺少 output.audio.url: {js}")
+    # 非流式返回的是临时 URL(有效期 24h),需再取一次才是音频字节
+    with urllib.request.urlopen(audio_url, timeout=60) as r:
+        return r.read()
+
+
 def synthesize(text, voice, provider):
-    """统一 TTS 入口:按 provider 分派到 mi_tts / minimax_tts。"""
+    """统一 TTS 入口:按 provider 分派到 mi_tts / minimax_tts / qwen_tts。"""
+    if provider == "qwen":
+        return qwen_tts(text, voice)
     if provider == "minimax":
         return minimax_tts(text, voice)
     return mi_tts(text, voice)
@@ -319,8 +359,9 @@ def build_parser():
     p.add_argument(
         "--tts-provider",
         default=None,
-        choices=("xiaomi", "minimax"),
-        help="TTS 引擎：xiaomi（默认）/ minimax；分镜顶层 tts_provider 字段也会被读，CLI 优先",
+        choices=PROVIDERS,
+        help=f"TTS 引擎：{' / '.join(PROVIDERS)}（默认 {DEFAULT_PROVIDER}）；"
+        "分镜顶层 tts_provider 字段也会被读，CLI 优先",
     )
     return p
 
@@ -351,13 +392,13 @@ def main():
     FPS = int(cfg.fps)
     style, W, H = cfg.style, cfg.W, cfg.H
     scenes = tpl["scenes"]
-    # TTS provider 决策:CLI > 分镜顶层 tts_provider > 默认 xiaomi
-    from tts_config import resolve_tts_provider
+    # TTS provider 决策:CLI > 分镜顶层 tts_provider > DEFAULT_PROVIDER
+    from tts_config import is_provider, resolve_tts_provider
     tts_provider = resolve_tts_provider(
         storyboard_provider=tpl.get("tts_provider"),
         cli_provider=getattr(args, "tts_provider", None),
     )
-    if tts_provider not in ("xiaomi", "minimax"):
+    if not is_provider(tts_provider):
         raise RuntimeError(f"未知 tts_provider: {tts_provider!r}")
     print(f"   tts_provider={tts_provider}")
     # 单次运行产物归属（#22）：run 目录拥有本次 preview + 加工音轨 + manifest；

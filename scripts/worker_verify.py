@@ -7,7 +7,7 @@
 六项定义见 scripts/worker_result.py（单一事实源）。本脚本只评估自己实测的
 3=mp4 存在且时长>0；4=音画锁 ±5%（成片音轨口径）；5=cache 命中（可选，
 按 (provider, voice, narrate, 解码版本) 指纹核对——provider 与渲染器同源：
-`--tts-provider` > 分镜顶层 `tts_provider` > xiaomi）；
+`--tts-provider` > 分镜顶层 `tts_provider` > minimax）；
 6=残留字面转义字符拦截。检查 1/2（闸门绿、预览无溢出）是父入口 Step 1/2 的
 职责——单独执行本脚本时没有其可靠运行证据，勾选串如实记 `·`（未执行），
 不声称通过；完整六格由 render_worker 用 Step 1/2 实际结果合成。
@@ -154,7 +154,7 @@ def main():
     # 检查 5：cache 命中按指纹核对（raw+meta 都算），不看目录文件数——
     # 旁白改过会残留旧指纹文件，计数口径误报；meta 不符时 render 会重 TTS（假阳性）。
     # provider 必须核实到渲染时的同一家（audio_cache v3 把 provider 并入指纹）：
-    # 漏传 provider 会退化成默认 xiaomi，MiniMax 课去查 xiaomi 指纹路径 → 全套假缺失。
+    # 漏传 provider 会退化成默认值，别的引擎的课去查错指纹路径 → 全套假缺失。
     if args.expect_reuse_audio:
         slug = os.path.splitext(os.path.basename(args.storyboard))[0]
         cache_dir = os.path.join(ROOT, "_build", slug)
@@ -163,7 +163,7 @@ def main():
             cli_provider=args.tts_provider,
         )
         if not is_provider(provider):
-            fail(5, f"未知 tts_provider: {provider!r}（应为 xiaomi 或 minimax）")
+            fail(5, f"未知 tts_provider: {provider!r}（应为 xiaomi、minimax 或 qwen）")
         for i, sc in enumerate(tpl["scenes"]):
             sc_voice = resolve_voice(sc, tpl)
             raw_path, _ = ac.paths(cache_dir, i, sc["narrate"], sc_voice, provider)

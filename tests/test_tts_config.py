@@ -31,10 +31,15 @@ def test_resolve_minimax_voice_unknown_chinese_falls_back():
     assert tc.resolve_minimax_voice("未知音色") == "female-tianmei"
 
 
+def test_resolve_tts_provider_defaults_to_minimax():
+    # 三家可选（xiaomi / minimax / qwen），默认走 MiniMax
+    assert tc.resolve_tts_provider() == "minimax"
+
+
 def test_resolve_tts_provider_priority():
-    assert tc.resolve_tts_provider() == "xiaomi"
-    assert tc.resolve_tts_provider(storyboard_provider="minimax") == "minimax"
+    # 优先级：CLI 参数 > 分镜顶层 tts_provider > 默认
+    assert tc.resolve_tts_provider(storyboard_provider="qwen") == "qwen"
     assert (
-        tc.resolve_tts_provider(storyboard_provider="minimax", cli_provider="xiaomi")
+        tc.resolve_tts_provider(storyboard_provider="qwen", cli_provider="xiaomi")
         == "xiaomi"
     )

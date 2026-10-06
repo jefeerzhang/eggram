@@ -11,7 +11,7 @@
 - 换皮（`--style`）不进指纹，不重 TTS
 - `--reuse-audio` 仅在 raw + `.meta.json` 与旁白/音色一致时命中；无 meta 的旧共享缓存一律 miss
 - meta 写有 `ver = CACHE_VERSION`（`scripts/audio_cache.py` 中常量，当前 `"3"`）；与当前值不一致则失效，解码逻辑改了旧缓存自动 miss
-- 指纹含 `provider|voice|narrate`：换 TTS 引擎（xiaomi / minimax）不会误复用另一家的 raw
+- 指纹含 `provider|voice|narrate`：换 TTS 引擎（xiaomi / minimax / qwen）不会误复用另一家的 raw
 
 ## 对话模式（多音色）
 

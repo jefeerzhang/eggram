@@ -44,7 +44,7 @@ description: >
      | 7 | summary | 可带走口诀/终极公式 | 总结要点，鼓励结尾 | - |
 
 3. **环境前置预检与向用户抛出 5 个选择题（Q1–Q5，把控内容、质量、形式、对话模式）**：
-   - **【前置环境检查】**：在输出大纲的同时，AI 必须先检查本地环境变量（`MIMO_API_KEY`、浏览器），若缺少 TTS Key，**必须在这一轮与选择题一同提示用户补齐**，严禁到渲染阶段才中途索要。
+   - **【前置环境检查】**：在输出大纲的同时，AI 必须先检查本地环境变量（TTS Key、浏览器）。TTS 引擎三选一（`minimax` 缺省 / `xiaomi` / `qwen`），Key 按本次 provider 取：`minimax` → `MINIMAX_API_KEY`、`xiaomi` → `MIMO_API_KEY`、`qwen` → `DASHSCOPE_API_KEY`（须华北2 北京地域的 Key）。缺少所选 provider 的 Key 时，**必须在这一轮与选择题一同提示用户补齐**，严禁到渲染阶段才中途索要。
    - **【内容深度】Q1 教学难度与受众**：
      - A. 零基础入门（趣味口语化、生活化类比、不堆砌术语）
      - B. 进阶应试（抓考点变形、公式化拆解、强化陷阱辨析）
@@ -145,7 +145,7 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 闸门规则 / 教学文本转义 | `scripts/storyboard_gate.py`（`prepare_storyboard` / `validate_storyboard` / `validate_layouts`）+ `templates/layout-*.html` |
 | 独立校验（不跑 TTS） | `py scripts/validate_storyboard.py <分镜.json>`（与渲染同一闸门，exit 2 = 失败） |
 | 音频解码 / 缓存命中 | `scripts/make_video.py`（`decode_wav`）+ `scripts/audio_cache.py`（`fingerprint` / `is_hit`）+ [`docs/audio.md`](docs/audio.md) |
-| TTS provider / 音色映射 | `scripts/tts_config.py`（`resolve_tts_provider` / MiniMax voice map）；`--tts-provider` 或分镜顶层 `tts_provider` |
+| TTS provider / 音色映射 | `scripts/tts_config.py`（`PROVIDERS` / `resolve_tts_provider` / MiniMax·Qwen voice map）；`--tts-provider` 或分镜顶层 `tts_provider` |
 | 加回归测试 | `tests/test_make_video.py` |
 | 跑全量回归 | `py -m pytest tests/` |
 

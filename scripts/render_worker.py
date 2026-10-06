@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_artifacts as ra  # noqa: E402
 import worker_result as wr  # noqa: E402
 from storyboard_gate import resolve_motion_enabled, resolve_style_name  # noqa: E402
+from tts_config import PROVIDERS  # noqa: E402  TTS provider 单一事实源
 
 
 class Parser(argparse.ArgumentParser):
@@ -100,7 +101,7 @@ def main():
     ap.add_argument("--browser", default=None)
     ap.add_argument(
         "--tts-provider",
-        choices=("xiaomi", "minimax"),
+        choices=PROVIDERS,
         default=None,
         help="TTS 引擎（优先于分镜顶层 tts_provider；透传 preflight / make_video / verify）",
     )

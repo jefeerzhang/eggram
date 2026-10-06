@@ -1027,7 +1027,7 @@ def validate_storyboard(tpl):
     provider = tpl.get("tts_provider")
     if provider is not None and not is_provider(provider):
         errors.append(
-            f"tts_provider={provider!r} 未知（可选: xiaomi / minimax）"
+            f"tts_provider={provider!r} 未知（可选: xiaomi / minimax / qwen）"
         )
     fps, fps_err = parse_positive_px(tpl.get("fps", 30), 30, "fps", maximum=120)
     if fps_err:

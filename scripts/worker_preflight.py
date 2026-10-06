@@ -6,7 +6,7 @@
 四项检查全过 → stdout 打印 PREFLIGHT_OK、exit 0；任一失败 → stderr 文案、exit 1。
 失败分类（FAIL_AT_PREFLIGHT）由 worker wrapper（issue 01）负责，本脚本只短路径失败。
 入口处先 load_env()：TTS key 检查只看 os.environ，必须在它之前把 ROOT/.env 读进来。
-第 3 项按本次 provider 查对应 key（provider = CLI > 分镜顶层 tts_provider > xiaomi）：
+第 3 项按本次 provider 查对应 key（provider = CLI > 分镜顶层 tts_provider > minimax）：
 MiniMax 课要的是 MINIMAX_API_KEY，拿 MIMO_API_KEY 顶替只会误报或漏检。
 """
 
@@ -18,7 +18,12 @@ import sys
 
 import toolchain as tc  # 纯 stdlib：只找浏览器，不拉媒体管线
 from storyboard_gate import load_env
-from tts_config import is_provider, minimax_config, resolve_tts_provider
+from tts_config import (
+    is_provider,
+    minimax_config,
+    qwen_config,
+    resolve_tts_provider,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VALIDATOR = os.path.join(ROOT, "scripts", "validate_storyboard.py")
@@ -62,7 +67,7 @@ def main():
         sys.exit(1)
 
     # 3. TTS key：只查环境变量，不试连 API（避免误判）。查哪个 key 由本次 provider
-    #    决定，与 make_video 同源（CLI > 分镜顶层 tts_provider > xiaomi）：
+    #    决定，与 make_video 同源（CLI > 分镜顶层 tts_provider > minimax）：
     #    MiniMax 课缺 MINIMAX_API_KEY 时要在这一步说清，而不是拿 MIMO_API_KEY 顶替。
     try:
         with open(args.storyboard, encoding="utf-8") as f:
@@ -74,9 +79,11 @@ def main():
         cli_provider=args.tts_provider,
     )
     if not is_provider(provider):
-        fail(f"unknown tts_provider: {provider!r}（应为 xiaomi 或 minimax）")
+        fail(f"unknown tts_provider: {provider!r}（应为 xiaomi、minimax 或 qwen）")
     if provider == "minimax":
         key_env, key = "MINIMAX_API_KEY", minimax_config()["key"]
+    elif provider == "qwen":
+        key_env, key = "DASHSCOPE_API_KEY", qwen_config()["key"]
     else:
         key_env, key = "MIMO_API_KEY", os.environ.get("MIMO_API_KEY")
     if not key:

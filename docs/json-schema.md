@@ -7,9 +7,9 @@
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | title | ✅ | 知识点名 |
-| voice | ✅ | 默认音色：mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean |
+| voice | ✅ | 默认音色：mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean。友好名按 provider 各自映射（如「冰糖」在 minimax 是 `Chinese (Mandarin)_Gentle_Senior`、在 qwen 是 `longanlingxin`），同一份分镜换 provider 无需改音色名；平台 voice_id 原值可直通 |
 | voices | | 对话模式角色映射（如 `{"narrator":"苏打","student":"冰糖"}`） |
-| tts_provider | | TTS 引擎：`xiaomi`（默认）/ `minimax`；CLI `--tts-provider` 可覆盖；非法值 → *闸门* 拒绝 |
+| tts_provider | | TTS 引擎：`minimax`（默认）/ `xiaomi` / `qwen`；CLI `--tts-provider` 可覆盖；非法值 → *闸门* 拒绝 |
 | style | | `teaching` / `classroom` / `explainer`；CLI `--style` 可覆盖 |
 | motion | | 顶层 bool，默认 true |
 | fps | | 正整数，默认 30（0、负数、布尔、非整数 → *闸门* 拒绝） |
