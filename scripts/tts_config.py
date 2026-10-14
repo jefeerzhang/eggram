@@ -185,3 +185,43 @@ DEFAULT_PROVIDER = "minimax"
 
 def is_provider(name):
     return name in PROVIDERS
+
+
+# 各 provider 的友好名清单。闸门按本次 provider 取对应一份校验音色，
+# 不再拿 xiaomi 的名单拦 minimax / qwen（那会把别家官方 voice_id 误报成错）。
+PROVIDER_VOICES = {
+    "xiaomi": (
+        "mimo_default",
+        "冰糖",
+        "茉莉",
+        "苏打",
+        "白桦",
+        "Mia",
+        "Chloe",
+        "Milo",
+        "Dean",
+    ),
+    "minimax": tuple(MINIMAX_VOICE_MAP),
+    "qwen": tuple(QWEN_VOICE_MAP),
+}
+
+# 平台 voice_id 直通判定：各 provider 自己的 resolver 用同一张脸谱表。
+_LOOKS_LIKE_VOICE_ID = {
+    "xiaomi": lambda v: True,  # xiaomi 无统一命名，闸门只认友好名
+    "minimax": _looks_like_minimax_voice_id,
+    "qwen": _looks_like_qwen_voice_id,
+}
+
+
+def provider_voice_names(provider):
+    """该 provider 的友好名清单。未知 provider 返回空表。"""
+    return PROVIDER_VOICES.get(provider, ())
+
+
+def is_known_voice(provider, name):
+    """音色对本次 provider 是否可识别：命中友好名，或像平台 voice_id 原值。"""
+    if not isinstance(name, str) or not name.strip():
+        return False
+    if name in PROVIDER_VOICES.get(provider, ()):
+        return True
+    return bool(_LOOKS_LIKE_VOICE_ID.get(provider, lambda v: False)(name))

@@ -12,8 +12,8 @@
 | tts_provider | | TTS 引擎：`minimax`（默认）/ `xiaomi` / `qwen`；CLI `--tts-provider` 可覆盖；非法值 → *闸门* 拒绝 |
 | style | | `teaching` / `classroom` / `explainer`；CLI `--style` 可覆盖 |
 | motion | | 顶层 bool，默认 true |
-| fps | | 正整数，默认 30（0、负数、布尔、非整数 → *闸门* 拒绝） |
-| width / height | | 默认 1280×720 |
+| fps | | 正整数，默认 30，上限 120（0、负数、布尔、非整数、超上限 → *闸门* 拒绝） |
+| width / height | | 默认 1280×720，上限各 3840（超出 → *闸门* 拒绝） |
 | scenes | ✅ | 分镜数组 |
 
 ## scenes[]
@@ -23,7 +23,7 @@
 | kind | ✅* | title / rule / diagram / example / mistake / practice / answer / summary |
 | role | | *page-role*；可代替 kind；与 kind 同写须一致 |
 | voice | | 每页音色覆盖：角色 ID（如 `"narrator"`）或音色名（如 `"苏打"`），省略用顶层默认 |
-| layout_variant | | 排版变体 ID（如 `"side"` / `"formula"`），回退默认 layout |
+| layout_variant | | 排版变体 ID（如 `"side"` / `"formula"`）；省略用默认 layout，写未知值 → *闸门* 报错 |
 | motion | | 字符串或 effects 数组，见 [`motion.md`](motion.md) |
 | header | ✅ | 「学习者此刻做什么」 |
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
@@ -33,7 +33,7 @@
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
-| hold | practice | ≥5.0 的有限数字（样例 5.0）；显式 `null`/空串/负数按非法输入报错；提供思考静音，**旁白不要口播计时**（「想几秒」「接下来三秒」等） |
+| hold | practice | 5.0–600.0 的有限数字（样例 5.0）；显式 `null`/空串/负数/超 600 → *闸门* 报错；>120 → *闸门* 告警长停顿，请确认是否为教学意图；提供思考静音，**旁白不要口播计时**（「想几秒」「接下来三秒」等） |
 | zh | | example/mistake 说明（缺省用 sub） |
 | think | | practice 提示语；缺省「先想一想，别急着看答案」（仅画面，不进 TTS）；空字符串隐藏提示与间距 |
 
@@ -65,7 +65,7 @@
 | example | `"steps"` | layout-visual.html | 2–4 步的动作、对象、结果 |
 | mistake | `"compare"` | layout-visual.html | 1–3 行错误、修正与原因 |
 
-省略 `layout_variant` → 使用默认 layout。变体文件不存在时自动回退默认。
+省略 `layout_variant` → 使用默认 layout。写未知 `layout_variant` → *闸门* 报错，不回退默认。
 
 `example` 的 `side` 变体：左栏使用 `body`（正确示例），右栏使用独立的 `wrong_body`（错误示例），不自动生成或复用正确句子。例如：
 

@@ -5,7 +5,7 @@ storyboard_gate.py — 分镜准备与静态闸门（唯一规则源）
 规则顺序与诊断；make_video.py（渲染）与 validate_storyboard.py（独立校验）
 消费同一行为，不留两套规则。
 
-纯准备行为：只依赖标准库、charts（SVG 字符串）与 tts_config（TTS provider 白名单，
+纯准备行为：只依赖标准库、charts（SVG 字符串）与 tts_config（TTS provider 与音色表，
 纯 stdlib），不导入 playwright/ffmpeg/numpy；
 缺少浏览器与音频运行依赖的环境也可完成静态分镜与页面校验。浏览器发现、TTS、
 编码等运行环境初始化归各 CLI 自身。
@@ -21,7 +21,12 @@ import re
 from collections import namedtuple
 
 from charts import resolve_chart, svg_escape
-from tts_config import is_provider
+from tts_config import (
+    DEFAULT_PROVIDER,
+    is_known_voice,
+    is_provider,
+    provider_voice_names,
+)
 from visual_layouts import VISUAL_KINDS, build_visual_html, validate_visual
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -269,18 +274,8 @@ _INLINE_BAKED_STYLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# 小米 TTS 音色白名单。闸门软提示（非阻塞）；实际拒绝在 TTS 阶段。
-VOICE_WHITELIST = (
-    "mimo_default",
-    "冰糖",
-    "茉莉",
-    "苏打",
-    "白桦",
-    "Mia",
-    "Chloe",
-    "Milo",
-    "Dean",
-)
+# 音色名单已移到 tts_config.PROVIDER_VOICES：闸门按本次 provider 各取一份，
+# 避免拿 xiaomi 一家的名单去拦 minimax / qwen 的官方 voice_id。
 
 
 def load_env():
@@ -1019,25 +1014,35 @@ def validate_storyboard(tpl):
     errors, warnings = [], []
     if not isinstance(tpl, dict):
         return [f"分镜顶层须为 JSON 对象（当前 {type(tpl).__name__}）"], warnings
-    voice = tpl.get("voice")
-    if voice is not None and voice not in VOICE_WHITELIST:
-        warnings.append(
-            f"voice={voice!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
-        )
-    voices_map = tpl.get("voices", {})
-    if not isinstance(voices_map, dict):
-        errors.append(f"voices 须为对象（角色→音色），当前 {type(voices_map).__name__}")
-        voices_map = {}
-    for role_id, vname in voices_map.items():
-        if vname not in VOICE_WHITELIST:
-            warnings.append(
-                f"voices.{role_id}={vname!r} 不在小米 TTS 白名单 {VOICE_WHITELIST}（API 可能拒绝；非阻塞）"
-            )
     provider = tpl.get("tts_provider")
     if provider is not None and not is_provider(provider):
         errors.append(
             f"tts_provider={provider!r} 未知（可选: xiaomi / minimax / qwen）"
         )
+    # 音色按本次 provider 各自的名单校验。拿 xiaomi 一家的名单去拦 minimax / qwen，
+    # 会把别家官方 voice_id 误报成错，用户无从判断该换音色还是该换引擎。
+    this_provider = provider if is_provider(provider) else DEFAULT_PROVIDER
+    voice_names = provider_voice_names(this_provider)
+
+    def _voice_warning(where, name):
+        return (
+            f"{where}={name!r} 不在 {this_provider} 的音色表 {voice_names}"
+            f"（可写该平台 voice_id 原值直接用；API 可能拒绝；非阻塞）"
+        )
+
+    def _voice_ok(name):
+        return is_known_voice(this_provider, name)
+
+    voice = tpl.get("voice")
+    if voice is not None and not _voice_ok(voice):
+        warnings.append(_voice_warning("voice", voice))
+    voices_map = tpl.get("voices", {})
+    if not isinstance(voices_map, dict):
+        errors.append(f"voices 须为对象（角色→音色），当前 {type(voices_map).__name__}")
+        voices_map = {}
+    for role_id, vname in voices_map.items():
+        if not _voice_ok(vname):
+            warnings.append(_voice_warning(f"voices.{role_id}", vname))
     fps, fps_err = parse_positive_px(tpl.get("fps", 30), 30, "fps", maximum=120)
     if fps_err:
         errors.append(fps_err)
@@ -1145,9 +1150,10 @@ def validate_storyboard(tpl):
                 )
         # 检查每页 voice 字段（支持角色 ID 或直接音色名）
         sc_voice = sc.get("voice")
-        if sc_voice and sc_voice not in voices_map and sc_voice not in VOICE_WHITELIST:
+        if sc_voice and sc_voice not in voices_map and not _voice_ok(sc_voice):
             warnings.append(
-                f"{prefix}: voice={sc_voice!r} 不在 voices 映射或 TTS 白名单"
+                f"{prefix}: voice={sc_voice!r} 不在 voices 映射，"
+                f"也不在 {this_provider} 的音色表 {voice_names}"
             )
         if "motion" in sc:
             mv = sc["motion"]
@@ -1487,8 +1493,8 @@ def prepare_storyboard(tpl, style_name=None, motion_enabled=None):
 
     - 最终配置：style（显式参数 > 顶层 style）、W/H、fps、motion_enabled
       （显式参数 > 顶层 motion 开关；CLI 的 --no-motion 由调用方折算进显式参数）
-    - 布局选择：kind+layout_variant 经 resolve_layout_file（未知/缺失变体回退默认），
-      检查与实际生成选用同一布局
+    - 布局选择：kind+layout_variant 经 resolve_layout_file；检查与实际生成选用同一布局，
+      未知 layout_variant 由 validate_storyboard 报错，不回退默认
     - 规则顺序：validate_layouts → validate_storyboard → 每页 resolve_motion →
       render_html → validate_rendered_html（诊断带 scenes[i] 前缀）
     - 纯准备行为：不触浏览器/ffmpeg/TTS
