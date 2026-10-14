@@ -29,6 +29,7 @@
 | sub | 推荐 | 副题；mistake=诱因；example 可兼中文义 |
 | body | ✅ | 主体；`**...**` = 高亮知识点；**换行用 `<br>`，严禁 `\n`**；公式上下标用 `<sub>`/`<sup>`、根号用 `<rad>`，详见 [`formulas.md`](formulas.md)；`rule` + `layout_variant: "formula"` 且有合法 `formula` 对象时可空 |
 | formula | rule + layout_variant formula | 对象：`display` / `num` / `den` / `parts[]`；见 [`formulas.md`](formulas.md) |
+| visual | 新变体 | 结构化关系/操作/纠错内容；仅用于 `rule/structure`、`example/steps`、`mistake/compare`，见下节 |
 | wrong_body | example side | 错误示例；`kind: "example"` 且 `layout_variant: "side"` 时须为非空字符串，`**...**` 标红 |
 | narrate | ✅ | TTS 口语短句 |
 | chart | diagram | 图表对象（`preset` + 数据），见下方说明 |
@@ -60,6 +61,9 @@
 | rule | `"side"` | layout-rule-side.html | 左规则右示例，需要即时示范 |
 | rule | `"formula"` | layout-rule-formula.html | 上公式下拆解，复杂数学公式；推荐结构化 `formula` 对象，仅 `body` 仍兼容 |
 | example | `"side"` | layout-example-side.html | 左正确右易错对比 |
+| rule | `"structure"` | layout-visual.html | 一层结构关系图，根节点与 2–4 个部件 |
+| example | `"steps"` | layout-visual.html | 2–4 步的动作、对象、结果 |
+| mistake | `"compare"` | layout-visual.html | 1–3 行错误、修正与原因 |
 
 省略 `layout_variant` → 使用默认 layout。变体文件不存在时自动回退默认。
 
@@ -68,6 +72,34 @@
 ```json
 {"kind": "example", "layout_variant": "side", "header": "比较句子", "body": "He **is reading**.", "wrong_body": "He **reading**.", "narrate": "现在进行时不能漏掉 be 动词。"}
 ```
+
+## visual 对象（结构、操作、纠错）
+
+选用原则见 [visual-design.md](visual-design.md)。三个变体都保留 `header/body/narrate`；`body` 写一句结论。不得把 `visual` 用在默认版式、`side` 或其它 kind。对象仅接收下列字段；额外字段也报错。
+
+```json
+{"kind":"rule","layout_variant":"structure","header":"能力怎样组成","body":"各部件分工协作。","narrate":"规则负责约束，工具负责动作。","visual":{"label":"能力组成","items":[{"label":"规则","text":"约束行为"},{"label":"工具","text":"执行**动作**"}]}}
+```
+
+```json
+{"kind":"example","layout_variant":"steps","header":"安排一次会议","body":"先检查时段，再创建日程。","narrate":"查看周五晚上的空闲时段，再创建会议。","visual":{"items":[{"label":"查看时段","text":"周五 19:00","result":"时段**空闲**"},{"label":"创建日程","text":"会议：项目讨论","result":"日程**创建成功**"}]}}
+```
+
+```json
+{"kind":"mistake","layout_variant":"compare","header":"知识不等于动作","body":"规则与执行工具分工不同。","narrate":"规则定义怎么做，工具才执行动作。","visual":{"items":[{"wrong":"规则**自己执行动作**","right":"规则约束，**工具执行**","reason":"行为规范与执行能力不是同一件事。"}]}}
+```
+
+| 变体 | 必填字段 | 数量与长度（含高亮标记） |
+| --- | --- | --- |
+| `structure` | `visual.label`；每项 `label/text` | `items` 2–4 项；根节点 ≤40 字符；每项 `label` ≤24、`text` ≤100 |
+| `steps` | 每项 `label/text/result` | `items` 2–4 项；`label` ≤24、`text/result` ≤100 |
+| `compare` | 每项 `wrong/right/reason` | `items` 1–3 项；`wrong/right` ≤80、`reason` ≤100 |
+
+全部字段须为非空字符串；`items` 须为数组。长度上限不是「保证任意文本适配画面」，仍须跑浏览器预览。所有标签和原因按文本转义；`text/result/wrong/right` 支持与正文相同的高亮和 HTML 白名单。没有原样 HTML 注入入口。
+
+`compare` 每项 `wrong` 必须用 `**` 标出错误点；`reason` 提供原因，因此不再要求 `body` 标红或额外提供 `sub/zh`。`right` 中的 `**` 使用正确色。其它变体的 `body` 规则保持不变。
+
+三个变体共用模板外壳，内部布局分别是分支连线、操作流水线、错误对照。预览与关闭 motion 时展示完整内容；开启 motion 时按数组顺序逐项点亮/揭示修正。具体时间语义见 [motion.md](motion.md#结构操作纠错的分步展示)。
 
 ## chart 对象（diagram 页面专用）
 

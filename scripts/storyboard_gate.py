@@ -22,6 +22,7 @@ from collections import namedtuple
 
 from charts import resolve_chart, svg_escape
 from tts_config import is_provider
+from visual_layouts import VISUAL_KINDS, build_visual_html, validate_visual
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(ROOT, "templates")
@@ -57,12 +58,12 @@ KIND_REGISTRY = {
         motion="focus",
         arc_phase=1,
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__"],
-        variants={"side": "layout-rule-side.html", "formula": "layout-rule-formula.html"},
-        variant_slots={"side": ["__ZH__"], "formula": ["__FORMULA_MAIN__", "__PARTS__"]},
+        variants={"side": "layout-rule-side.html", "formula": "layout-rule-formula.html", "structure": "layout-visual.html"},
+        variant_slots={"side": ["__ZH__"], "formula": ["__FORMULA_MAIN__", "__PARTS__"], "structure": ["__VISUAL__"]},
         overflow_selectors=[
             ".title", ".badge", ".sub", ".body", ".formula", ".formula-frac",
             ".formula-num", ".formula-den", ".step-text", ".example-text", ".hl",
-            ".rad", ".err",
+            ".rad", ".err", ".visual", ".visual-root", ".visual-label", ".visual-text",
         ],
     ),
     "diagram": KindSpec(
@@ -86,11 +87,11 @@ KIND_REGISTRY = {
         motion="focus",
         arc_phase=2,
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
-        variants={"side": "layout-example-side.html"},
-        variant_slots={"side": ["__WRONG_BODY__"]},
+        variants={"side": "layout-example-side.html", "steps": "layout-visual.html"},
+        variant_slots={"side": ["__WRONG_BODY__"], "steps": ["__VISUAL__"]},
         overflow_selectors=[
             ".title", ".badge", ".sub", ".en", ".col-text", ".zh", ".hl", ".rad",
-            ".err",
+            ".err", ".body", ".visual", ".visual-action", ".visual-text", ".visual-result",
         ],
     ),
     "mistake": KindSpec(
@@ -100,10 +101,11 @@ KIND_REGISTRY = {
         motion="pulse",
         arc_phase=3,
         needs=["__HEADER__", "__BODY__", "__SUB__", "__BADGE__", "__ZH__"],
-        variants={},
-        variant_slots={},
+        variants={"compare": "layout-visual.html"},
+        variant_slots={"compare": ["__VISUAL__"]},
         overflow_selectors=[
             ".title", ".badge", ".sub", ".q", ".why", ".hl", ".rad", ".err",
+            ".body", ".zh", ".visual", ".visual-wrong", ".visual-right", ".visual-reason",
         ],
     ),
     "practice": KindSpec(
@@ -824,6 +826,12 @@ def render_html(sc, cfg):
     else:
         html = MOTION_CSS + html
     body_html = highlight_body(_text(sc.get("body")), kind)
+    visual_html = ""
+    if isinstance(layout_variant, str) and VISUAL_KINDS.get(layout_variant) == kind:
+        visual_errors = validate_visual(sc, kind, "scene")
+        if visual_errors:
+            raise ValueError("; ".join(visual_errors))
+        visual_html = build_visual_html(sc["visual"], layout_variant, _escape, highlight_body)
     zh = _text(sc.get("zh")) or _text(sc.get("sub"))
     formula = sc.get("formula") if isinstance(sc.get("formula"), dict) else None
     use_formula = kind == "rule" and layout_variant == "formula"
@@ -860,8 +868,9 @@ def render_html(sc, cfg):
         "__HEADER__": _escape(_text(sc.get("header"))),
         "__BADGE__": KIND_BADGE.get(kind, ""),
         "__SUB__": _escape(_text(sc.get("sub"))),
-        "__ZH__": _escape(zh),
+        "__ZH__": _escape(_text(sc.get("zh")) if visual_html else zh),
         "__BODY__": body_html,
+        "__VISUAL__": visual_html,
         "__FORMULA_MAIN__": formula_main,
         "__PARTS__": parts_html,
         "__WRONG_BODY__": highlight_body(_text(sc.get("wrong_body")), "mistake"),
@@ -1084,6 +1093,7 @@ def validate_storyboard(tpl):
                 fe, fw = validate_formula_field(sc, prefix)
                 errors.extend(fe)
                 warnings.extend(fw)
+        errors.extend(validate_visual(sc, kind, prefix))
         required = ["header", "narrate"]
         formula_ok = (
             kind == "rule"
@@ -1171,7 +1181,7 @@ def validate_storyboard(tpl):
                             )
             else:
                 errors.append(f"{prefix}: motion 格式错误（应为字符串或数组）")
-        if kind == "mistake":
+        if kind == "mistake" and variant != "compare":
             if "**" not in _text(sc.get("body")):
                 errors.append(
                     f"{prefix}: mistake（common_mistake）的 body 须用 ** 标出错误点"

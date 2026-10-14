@@ -33,6 +33,7 @@ import toolchain as tc  # noqa: E402  本机工具定位（纯 stdlib，惰性�
 import worker_result as wr  # noqa: E402  子进程退出码契约（与 worker 共用）
 # 只导入本模块真正要用的闸门名字。这里曾经整块再导出 24 个名字供测试消费 mv.*——
 # 同一个实现于是有两个 interface，还掩盖了哪条规则归哪个模块。
+from visual_layouts import apply_visual_state
 from storyboard_gate import (
     _motion_display_name,
     _motion_probe_states,
@@ -610,6 +611,8 @@ def main():
                     formula_motion_vars(fparts, 1.0, 1.0) if fparts is not None else None
                 )
                 apply_motion_css_vars(page, motion_vars(motion, 0.0, 1.0), fvars)
+                if "visual" in sc:
+                    apply_visual_state(page, sc)
                 shot = page.screenshot(type="png", animations="disabled")
                 for _ in range(n_frames):
                     ff_stdin.write(shot)
@@ -630,6 +633,8 @@ def main():
                         frame_motion_state(motion, k, FPS, narr_frames),
                         fvars,
                     )
+                    if "visual" in sc:
+                        apply_visual_state(page, sc, k / float(FPS), narr_seconds)
                     ff_stdin.write(page.screenshot(type="png", animations="disabled"))
                     gi += 1
         b.close()

@@ -69,6 +69,19 @@
 
 变量与实现在 [`scripts/storyboard_gate.py`](../scripts/storyboard_gate.py)（`formula_motion_vars` / `apply_motion_css_vars` / `MOTION_CSS`）。
 
+## 结构、操作、纠错的分步展示
+
+仅用于 `rule/structure`、`example/steps`、`mistake/compare` 的 `visual.items`，不新增 motion 类型。开启 motion 时，旁白总时长按项目数量均分；每项在其窗口的前半段线性点亮，后半段保持。结构部件与操作步骤从淡显到全亮；纠错先完整展示错误，再逐行揭示修正及原因。先前点亮的内容保持全亮。
+
+- 与整页动效使用同一时钟：`elapsed = k/fps`，`duration = narr_frames/fps`。
+- `hold` 和尾垫冻结末态；超出旁白时长不继续推进。
+- 顶层 `motion: false`、`--no-motion`、每页 `motion: "none"`、单帧页均完整静态展示。
+- 分步时间不读取 effects 的 `delay`；该字段只控制已有整页动效。
+- 预览无真实音频，展示完整末态并沿用整页动效溢出采样。
+- 数组順序须与旁白顺序一致；这是总时长比例动画，不是逐句音画对齐。
+
+实现：[`scripts/visual_layouts.py`](../scripts/visual_layouts.py) 的 `visual_reveal_levels` / `apply_visual_state`；CSS 在 `templates/layout-visual.html`，渲染入口在 `scripts/make_video.py`。
+
 ## 音画锁
 
 动效由**秒语义**驱动（见上节时间语义）；旁白结束后的 `hold` 与尾垫（静音）期间画面停在末态，不再 pulse/zoom（见 [audio.md](audio.md)）。零时长旁白、零 hold 不产生除零或丢帧。

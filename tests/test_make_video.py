@@ -833,7 +833,7 @@ def test_prepare_storyboard_resolves_variant_and_fallback():
     rule["layout_variant"] = "nope"  # 未知变体 → 闸门报错（渲染侧仍回退默认布局）
     prep2 = sg.prepare_storyboard(tpl)
     assert [e for e in prep2["errors"] if "未知 layout_variant" in e] == [
-        "scenes[1]: 未知 layout_variant='nope'（可选: formula, side）"
+        "scenes[1]: 未知 layout_variant='nope'（可选: formula, side, structure）"
     ]
     fallback = next(e for e in prep2["scenes"] if e["variant"] == "nope")
     assert fallback["layout_file"] == "layout-rule.html"
@@ -1238,19 +1238,6 @@ def test_browser_formula_vars_drive_computed_style(browser):
 
 
 # ---- 浏览器实测：文本保真 + 溢出探测（找不到浏览器则跳过）----
-
-
-@pytest.fixture(scope="session")
-def browser():
-    path = tc.browser_path()
-    if not path:
-        pytest.skip("no Chrome/Edge available")
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        b = p.chromium.launch(executable_path=path, headless=True)
-        yield b
-        b.close()
 
 
 def test_browser_text_fidelity(browser):
