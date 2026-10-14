@@ -9,7 +9,7 @@ description: >
 
 产物：本目录 Skill + `examples/<point>.json` → `output/*.mp4`。
 
-**Leading words：** *脚本硬阻断*（生成 JSON 前人眼对齐）· *分镜*（内容 IR）· *闸门*（TTS 前硬校验）· *换皮*（只改 style）· *音画锁*（hold 进音轨且等长）· *page-role*（教学弧）
+**Leading words：** *脚本硬阻断*（生成 JSON 前人眼对齐）· *分镜*（内容 IR）· *闸门*（TTS 前硬校验）· *换皮*（只改 style）· *画面设计*（关系/操作/纠错，见 [`docs/visual-design.md`](docs/visual-design.md)）· *音画锁*（hold 进音轨且等长）· *page-role*（教学弧）
 
 三阶段流程：阶段 0 方案与用户确认（硬阻断）→ 阶段 1 分镜落盘与闸门 → 阶段 2 视频渲染。改 *分镜* 或模板后先过 *闸门* 再全量配音。
 
@@ -22,7 +22,7 @@ description: >
 
 **Done when：**
 
-1. AI 输出完整的教学设计清单（知识点定调、一句话目标、逐页大纲表）。
+1. AI 输出完整的教学设计清单（知识点定调、一句话目标、逐页大纲表、画面设计）。
 2. AI 抛出 **5 个**选择题，逐一覆盖**内容深度（Q1）、例题场景（Q2）、动效节奏（Q3）、视觉声音（Q4）、讲解模式（Q5，单人/双人）**。
 3. **用户明确回复选择与确认**（若提出修改，AI 重新输出调整后大纲并二次确认）。
 
@@ -33,15 +33,17 @@ description: >
    - **课题定位与目标**：明确知识点、适用对象、学完即拿走的 1 句话收获。
    - **逐页内容清单（内容把控核心）**：
 
-     | 序号 | 角色 (role/kind) | 画面主要内容（标出 `**高亮**` 处） | 旁白草稿 (Narrate) | 互动说明 (Hold/Think) |
-     | :--- | :--- | :--- | :--- | :--- |
-     | 1 | title | 标题 + 副标/英译 | 吸引注意，引入主题 | - |
-     | 2 | rule | 核心定义/结构式 | 拆解规则 | - |
-     | 3 | example | 典型示范 + 译文 | 示范应用 | - |
-     | 4 | mistake | 典型易错点 | 敲黑板，分析诱因 | - |
-     | 5 | practice | 互动自测题 | 只抛问题/选项，**不说**「想几秒」 | 停顿靠 hold≥5s；提示写 think |
-     | 6 | answer | 答案揭晓 + 简短原因 | 正向反馈，解释原因 | - |
-     | 7 | summary | 可带走口诀/终极公式 | 总结要点，鼓励结尾 | - |
+     | 序号 | 角色 (role/kind) | 画面主要内容（标出 `**高亮**` 处） | 画面形式与变化 | 旁白草稿 (Narrate) | 互动说明 (Hold/Think) |
+     | :--- | :--- | :--- | :--- | :--- | :--- |
+     | 1 | title | 标题 + 副标/英译 | 大字开场 | 吸引注意，引入主题 | - |
+     | 2 | rule | 核心定义/结构式 | 结构关系/公式拆解；注明选择理由 | 拆解规则 | - |
+     | 3 | example | 典型示范 + 译文 | 操作步骤/对象与结果；注明顺序 | 示范应用 | - |
+     | 4 | mistake | 典型易错点 | 错误→修正→原因 | 分析诱因 | - |
+     | 5 | practice | 互动自测题 | 问题画面，不提前露答案 | 只抛问题/选项，**不说**「想几秒」 | 停顿靠 hold≥5s；提示写 think |
+     | 6 | answer | 答案揭晓 + 简短原因 | 解释判断依据 | 正向反馈，解释原因 | - |
+     | 7 | summary | 可带走口诀/终极公式 | 简短收束 | 总结要点，鼓励结尾 | - |
+
+   - **画面设计要求**：读 [`docs/visual-design.md`](docs/visual-design.md)，按知识关系选择画面；换皮不算新形式。每页写明「学习者看什么、看见什么变化」，不只写「文字卡片 + 缩放」。讲解段优先交替使用适合本课的两种形式；确实不适合时注明理由，不硬凑结构图或操作流程。
 
 3. **环境前置预检与向用户抛出 5 个选择题（Q1–Q5，把控内容、质量、形式、对话模式）**：
    - **【前置环境检查】**：在输出大纲的同时，AI 必须先检查本地环境变量（TTS Key、浏览器）。TTS 引擎三选一（`minimax` 缺省 / `xiaomi` / `qwen`），Key 按本次 provider 取：`minimax` → `MINIMAX_API_KEY`、`xiaomi` → `MIMO_API_KEY`、`qwen` → `DASHSCOPE_API_KEY`（须华北2 北京地域的 Key）。缺少所选 provider 的 Key 时，**必须在这一轮与选择题一同提示用户补齐**，严禁到渲染阶段才中途索要。
@@ -86,7 +88,7 @@ py scripts/validate_storyboard.py examples/<point_slug>.json
 
 1. 读 [`docs/teaching-method.md`](docs/teaching-method.md)，按 *page-role* 拆弧，写入 `kind`（可同写 `role`）。  
    **Done when：** 含必选弧 `title → rule+ → example+ → practice → answer → summary`；推荐在 `practice` 前有 `mistake`。
-2. 填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。  
+2. 将确认的画面设计落入 `layout_variant` + `visual`，再填字段；字段表见 [`docs/json-schema.md`](docs/json-schema.md)。结构图用 `rule/structure`，操作示范用 `example/steps`，纠错用 `mistake/compare`；数据格式和选用条件见 [`docs/visual-design.md`](docs/visual-design.md)。
    **Done when：** 每段有 `header/body/narrate`；需强调处用 `**`；`practice.hold >= 5.0`；正文是教学内容（色值/字号只在 style）。  
    **practice 旁白禁令：** 禁止口播任何思考计时（「想一下」「我想五秒」「接下来三秒」「给你三秒钟」等）。停顿只靠 `hold` 静音；屏幕提示只写 `think` 字段。  
    **body 换行规则：** 用 `<br>` 表示换行（如 `"body": "第一行<br>第二行"`），**严禁用 `\n`**——`\n` 会被原样显示为文本而非换行。  
@@ -120,7 +122,8 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 
 - *闸门* 绿（含教学弧顺序；`practice.hold >= 5.0`）
 - 预览：`_build/preview/<slug>/s*.png` 无文字溢出（worker 换皮批并行时按 style 隔离为 `<slug>__<style>/`，见 #18）
-- 画面：教学内容、整页居中、易错/练习可扫区分
+- 画面：教学内容、主体居中、易错/练习可扫区分；实际版式与确认的画面设计一致
+- 呈现形式：关系图能读出关系，操作示范能读出动作与结果，纠错能读出错误与修正；不以换色/推拉冒充形式变化
 - 动效：讲解聚焦、易错/练习轻脉冲（未 `--no-motion` 时）
 - 音频：`hold` 段为静音；段间接缝干净；成片时长 ≈ Σ(旁白+hold)（*音画锁*）
 - worker 模式：六项自动验收替代人工勾选（`verify: [✓✓✓✓-✓]`，条目与图例见 `scripts/worker_result.py`：✓ 通过、✗ 失败、- 显式跳过、· 因前序失败未执行；单独跑 `worker_verify.py` 时前两项如实记 `·`）；回传 `cache:` 字段报告本次 TTS 生成/复用事实（通过检查 5 ≠ 零 TTS，见 [`docs/audio.md`](docs/audio.md)）；画面内容/动效体感/音频接缝 3 项仍需人看
@@ -134,6 +137,8 @@ py scripts/make_video.py examples/<point_slug>.json [output/<name>.mp4] [--style
 | 写/改一课内容 | 阶段 0 方案确认 → *分镜* JSON → *闸门* → 阶段 2 |
 | *换皮* | JSON `"style"` 或 `--style`；[`docs/styles.md`](docs/styles.md) |
 | 新皮 | 只加 `templates/style-<name>.json` |
+| *画面设计* / 呈现形式单一 | [`docs/visual-design.md`](docs/visual-design.md)；阶段 0 确认形式，阶段 1 落 `visual` |
+| 结构图/操作示范/对比纠错 | `scripts/visual_layouts.py` + `templates/layout-visual.html`；字段见 [`docs/json-schema.md`](docs/json-schema.md) |
 | 改版式/居中槽 | `templates/layout-*.html`（色从 style 来） |
 | 动效幅度/默认 | [`docs/motion.md`](docs/motion.md) + `make_video.py` |
 | 卡顿/hold/拼接 | [`docs/audio.md`](docs/audio.md) + `prepare_scene_audio` |
