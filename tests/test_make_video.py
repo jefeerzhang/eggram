@@ -623,6 +623,17 @@ def test_sample_passes_think_and_escape():
     assert not errors
 
 
+def test_xiaomi_unknown_voices_warn_at_all_three_locations():
+    tpl = load_sample()
+    tpl.update(tts_provider="xiaomi", voice="不存在的默认音色",
+               voices={"teacher": "不存在的角色音色"})
+    tpl["scenes"][0]["voice"] = "not_a_real_voice"
+    errors, warnings = sg.validate_storyboard(tpl)
+    assert not errors
+    for value in ("不存在的默认音色", "不存在的角色音色", "not_a_real_voice"):
+        assert any(value in warning and "xiaomi" in warning for warning in warnings)
+
+
 @pytest.mark.parametrize("wrong_body", [None, "", "   ", 123])
 def test_side_example_requires_wrong_body(wrong_body):
     tpl = load_sample()
@@ -733,6 +744,30 @@ def test_render_html_formula_injects_parts_and_data_id():
     assert 'data-part-id="num"' in html
     assert 'data-part-id="den"' in html
     assert "超额" in html
+
+
+@pytest.mark.parametrize("part_id", ["__NUM__", '<rad>x</rad>"&', r"part\n"])
+def test_browser_formula_ids_survive_gate_and_motion_matching(browser, part_id):
+    sc = _rule_formula_scene()
+    sc["formula"]["parts"][0]["id"] = part_id
+    assert not sg.validate_formula_field(sc, "scene")[0]
+    html = sg.render_html(sc, _cfg())
+    assert not sg.validate_rendered_html(html, 0)
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(html)
+        steps = page.locator(".step[data-part-id]")
+        assert steps.count() == 2
+        assert steps.first.get_attribute("data-part-id") == part_id
+        sg.apply_motion_css_vars(
+            page, sg.MotionState(1.0, 1.0, 0.0),
+            sg.formula_motion_vars(sc["formula"]["parts"], 0.5, 1.0),
+        )
+        assert steps.evaluate_all(
+            "els => els.map(el => Number(getComputedStyle(el).opacity))"
+        ) == [pytest.approx(1.0), pytest.approx(0.45)]
+    finally:
+        page.close()
 
 
 def test_render_html_legacy_formula_variant_uses_body():

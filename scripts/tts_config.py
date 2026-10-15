@@ -207,7 +207,7 @@ PROVIDER_VOICES = {
 
 # 平台 voice_id 直通判定：各 provider 自己的 resolver 用同一张脸谱表。
 _LOOKS_LIKE_VOICE_ID = {
-    "xiaomi": lambda v: True,  # xiaomi 无统一命名，闸门只认友好名
+    "xiaomi": lambda v: False,  # xiaomi 无统一命名，闸门只认友好名
     "minimax": _looks_like_minimax_voice_id,
     "qwen": _looks_like_qwen_voice_id,
 }

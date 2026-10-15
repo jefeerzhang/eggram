@@ -548,6 +548,18 @@ _WHITELIST_TAGS = (
 )
 
 
+def _escape_plain(text):
+    """纯文本/属性转义，不还原教学 HTML 白名单。
+
+    用实体保留字面 <、反斜杠和下划线，避免把纯文本误认成转义失败或残留槽位。
+    DOM 解析后仍得到原值，公式 ID 可与动效时间线精确匹配。
+    """
+    return (
+        svg_escape(text).replace("_", "&#95;")
+        .replace("&lt;", "&#60;").replace("\\", "&#92;")
+    )
+
+
 def _escape(text):
     """把教学字段当纯文本：& < > \" ' 按字面显示；下划线转为实体以中和 __...__ 槽位 token，
     避免内容被后续槽二次解释或被误判为残留占位符。
@@ -770,10 +782,10 @@ def build_formula_parts_html(parts, *, legacy_zh="", badge=""):
         items = parts
     chunks = ['<div class="breakdown">']
     for i, p in enumerate(items):
-        # 属性值上下文：必须用 svg_escape（< → &lt;、" → &quot; 由解析器还原回原值）。
+        # 属性值上下文：转义引号与标签，并中和 __...__，由 DOM 解析器还原原始 ID。
         # 曾经误用 _escape（文本上下文），其白名单还原串 '<span class="rad">' 里的
         # 引号会提前闭合属性，前端 findIndex 失配 → 该页所有 .step 永久停在暗态。
-        pid = svg_escape(str(p.get("id") or f"p{i}"))
+        pid = _escape_plain(str(p.get("id") or f"p{i}"))
         label = _escape(str(p.get("label") or str(i + 1)))
         text = highlight_body(p.get("text") or "", "rule")
         chunks.append(
@@ -826,7 +838,7 @@ def render_html(sc, cfg):
         visual_errors = validate_visual(sc, kind, "scene")
         if visual_errors:
             raise ValueError("; ".join(visual_errors))
-        visual_html = build_visual_html(sc["visual"], layout_variant, _escape, highlight_body)
+        visual_html = build_visual_html(sc["visual"], layout_variant, _escape_plain, highlight_body)
     zh = _text(sc.get("zh")) or _text(sc.get("sub"))
     formula = sc.get("formula") if isinstance(sc.get("formula"), dict) else None
     use_formula = kind == "rule" and layout_variant == "formula"

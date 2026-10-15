@@ -128,6 +128,33 @@ def test_visual_text_uses_existing_escape_contract(variant):
     assert '重点</span>' in html
 
 
+@pytest.mark.parametrize("variant,field,selector", [
+    ("structure", "root", ".visual-root"),
+    ("structure", "label", ".visual-label"),
+    ("steps", "label", ".visual-action"),
+    ("compare", "reason", ".visual-reason"),
+])
+@pytest.mark.parametrize("literal", ["A<br>B<sup>2</sup>__X__", r"<rad>x</rad>\n"])
+def test_browser_visual_labels_and_reasons_remain_literal(browser, variant, field, selector, literal):
+    sc = scene(variant)
+    if field == "root":
+        sc["visual"]["label"] = literal
+    else:
+        sc["visual"]["items"][0][field] = literal
+    assert not vl.validate_visual(sc, sc["kind"], "scene")
+    html = sg.render_html(sc, cfg())
+    assert not sg.validate_rendered_html(html, 0)
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    try:
+        page.set_content(html)
+        element = page.locator(selector).first
+        expected = "1" + literal if variant == "steps" else literal
+        assert element.text_content() == expected
+        assert element.locator("br, sup").count() == 0
+    finally:
+        page.close()
+
+
 def test_reveal_clock_is_cumulative_seek_safe_and_frozen_during_hold():
     assert vl.visual_reveal_levels(3, 0, 6) == [0, 0, 0]
     assert vl.visual_reveal_levels(3, 1, 6) == [1, 0, 0]
